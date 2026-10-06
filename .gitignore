@@ -1,0 +1,26 @@
+# ---- 构建产物 ----
+build/
+app/build/
+.gradle/
+captures/
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+
+# ---- 本机配置（每个人 SDK 路径不同，绝不能提交）----
+local.properties
+
+# ---- 签名文件（泄露了别人就能冒名发版）----
+*.jks
+*.keystore
+keystore.properties
+release/
+
+# ---- IDE / 系统 ----
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+*.log
