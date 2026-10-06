@@ -20,46 +20,78 @@ import java.io.IOException;
 import java.io.InputStream;
 
 /**
- * 宠物的绘制、动作与表情。
+ * 宠物的绘制、动作、皮肤与交互。
  *
- * 表情是"整张换图"，不是贴一块脸上去。
- * 原因：表情图和底图是两次独立生成的，脸相对身体的位置、缩放都有偏差，
- * 任何"贴片"方案都会在"露接缝"和"露重影"之间二选一（试过六种遮罩策略，都不成立）。
- * 整张换掉就没有这个问题 —— 每张图内部是自洽的，身体也不会跳。
+ * 皮肤 = 一套放在 assets/skins/&lt;名字&gt;/ 里的立绘：
+ *   一张基准正面立绘 pet_stand.png + 若干表情 pet_face_*.png
+ * 加一套皮肤只要在 SKINS 里加一行 + 往 assets/skins/ 放图。
  *
- * 两个状态共用同一套图：
- *   悬空态 —— 直接画整张
- *   趴边态 —— 把图顺时针转 90°，只画"头部区块"，贴在屏幕边缘
+ * 表情是"整张换图"，不是贴一块脸上去 ——
+ * 表情图和底图是两次独立生成的，五官位置和缩放都有偏差，
+ * 任何"贴片"方案都会在「露接缝」和「露重影」之间二选一。
+ * 整张换掉就没这个问题：每张图内部是自洽的，身体也不会跳。
  */
 public class PetView extends View implements Choreographer.FrameCallback {
 
     public static final int STATE_HOVER = 0;
     public static final int STATE_PERCH = 1;
 
-    // 表情索引。0 是原图
-    public static final int FACE_NORMAL = 0;
-    public static final int FACE_HAPPY = 1;
-    public static final int FACE_SAD = 2;
-    public static final int FACE_ANGRY = 3;
-    public static final int FACE_SURPRISED = 4;
-    public static final int FACE_SHY = 5;
-    public static final int FACE_CONFUSED = 6;
+    private static final String DIR_MAID = "skins/maid/";
+    private static final String DIR_BASIN = "skins/basin/";
 
-    private static final String[] FACE_FILES = {
-            "pet_stand.png",
-            "pet_face_happy.png",
-            "pet_face_sad.png",
-            "pet_face_angry.png",
-            "pet_face_surprised.png",
-            "pet_face_shy.png",
-            "pet_face_confused.png",
+    // 头部区块的默认比例（女仆装那套调的）
+    private static final float DEF_HX0 = 35f / 1191f;
+    private static final float DEF_HX1 = 985f / 1191f;
+    private static final float DEF_HY0 = 30f / 1514f;
+    private static final float DEF_HY1 = 800f / 1514f;
+
+    /**
+     * 一套皮肤。
+     *
+     * hx0/hx1/hy0/hy1 = 趴边时显示素材的哪一块（占素材宽高的比例）。
+     * 必须每套皮肤单独给 —— 饭盆头那顶盆横向撑得比女仆装宽得多，
+     * 沿用同一套比例会把盆的右边切掉一块。
+     */
+    public static final class Skin {
+        public final String name, base;
+        public final String[] faces;
+        public final float hx0, hx1, hy0, hy1;
+
+        Skin(String name, String base, String[] faces) {
+            this(name, base, faces, DEF_HX0, DEF_HX1, DEF_HY0, DEF_HY1);
+        }
+
+        Skin(String name, String base, String[] faces,
+             float hx0, float hx1, float hy0, float hy1) {
+            this.name = name;
+            this.base = base;
+            this.faces = faces;
+            this.hx0 = hx0;
+            this.hx1 = hx1;
+            this.hy0 = hy0;
+            this.hy1 = hy1;
+        }
+    }
+
+    // 第一套是默认皮肤
+    public static final Skin[] SKINS = {
+            new Skin("饭盆头", DIR_BASIN + "pet_stand.png", new String[]{
+                    DIR_BASIN + "pet_face_happy.png",
+                    DIR_BASIN + "pet_face_sad.png",
+                    DIR_BASIN + "pet_face_angry.png",
+                    DIR_BASIN + "pet_face_surprised.png",
+                    DIR_BASIN + "pet_face_shy.png",
+                    DIR_BASIN + "pet_face_confused.png",
+            }, 0.020f, 0.985f, 0.015f, 0.560f),
+            new Skin("女仆装", DIR_MAID + "pet_stand.png", new String[]{
+                    DIR_MAID + "pet_face_happy.png",
+                    DIR_MAID + "pet_face_sad.png",
+                    DIR_MAID + "pet_face_angry.png",
+                    DIR_MAID + "pet_face_surprised.png",
+                    DIR_MAID + "pet_face_shy.png",
+                    DIR_MAID + "pet_face_confused.png",
+            }),
     };
-
-    // 头部区块的位置，用"占素材宽高的比例"表示，这样换素材尺寸也不用改代码
-    private static final float HEAD_FX0 = 35f / 1191f;
-    private static final float HEAD_FX1 = 985f / 1191f;
-    private static final float HEAD_FY0 = 30f / 1514f;
-    private static final float HEAD_FY1 = 800f / 1514f;
 
     private static final float NS = 1_000_000_000f;
     private static final long LONG_PRESS_MS = 800;
@@ -73,9 +105,13 @@ public class PetView extends View implements Choreographer.FrameCallback {
     }
 
     private Context ctx;
-    private Bitmap cur;          // 当前显示的那张完整立绘
-    private Bitmap curRot;       // 它的顺时针 90° 版本（趴边用）
-    private boolean ownsCur;     // cur 是不是我们自己解码的（不是基准图）
+    private Bitmap baseBmp;      // 基准立绘（跟皮肤走）
+    private Bitmap faceBmp;      // 当前表情（需要回收）
+    private Bitmap cur;          // 当前显示的那张
+    private Bitmap rotCache;     // cur 的 90° 版本，趴边用，按需生成
+
+    private int skinIdx = 0, faceCur = 0;
+    private boolean[] faceOk = new boolean[0];
 
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -85,19 +121,11 @@ public class PetView extends View implements Choreographer.FrameCallback {
 
     private int state = STATE_HOVER;
     private boolean mirrorX = false;
-    private float hoverHeightDp = 240f;
-    private float perchWidthDp = 96f;
-    private float ampScale = 0.75f;
+    private float hoverHeightDp = 240f, perchWidthDp = 96f, ampScale = 0.75f;
 
     private float pDy, pSx = 1f, pSy = 1f;
 
-    private boolean sleepy = false;
-    private long lastTouchNs;
     private float dragTilt;
-
-    private int faceCur = FACE_NORMAL;
-    private boolean[] faceOk = new boolean[FACE_FILES.length];
-
     private long startNs, lastFrameNs, tapNs;
     private long frameIntervalNs = (long) (NS / 30);
     private boolean windowVisible = true, looping = false;
@@ -120,30 +148,13 @@ public class PetView extends View implements Choreographer.FrameCallback {
     private void init(Context c) {
         ctx = c;
         touchSlop = ViewConfiguration.get(c).getScaledTouchSlop();
-        for (int i = 0; i < FACE_FILES.length; i++) {
-            faceOk[i] = assetExists(FACE_FILES[i]);
-        }
-        cur = decode(FACE_FILES[0]);
-        ownsCur = false;
-        if (cur != null) {
-            srcW = cur.getWidth();
-            srcH = cur.getHeight();
-            headX0 = Math.round(srcH - 1 - HEAD_FY1 * srcH);
-            headX1 = Math.round(srcH - 1 - HEAD_FY0 * srcH);
-            headY0 = Math.round(HEAD_FX0 * srcW);
-            headY1 = Math.round(HEAD_FX1 * srcW);
-            curRot = rotate90(cur);
-        }
         paint.setFilterBitmap(true);
         paint.setDither(true);
-    }
-
-    private boolean assetExists(String name) {
-        try { ctx.getAssets().open(name).close(); return true; }
-        catch (Exception e) { return false; }
+        applySkin(0);
     }
 
     private Bitmap decode(String name) {
+        if (name == null) return null;
         try {
             InputStream is = ctx.getAssets().open(name);
             Bitmap b = BitmapFactory.decodeStream(is);
@@ -154,13 +165,114 @@ public class PetView extends View implements Choreographer.FrameCallback {
         }
     }
 
+    private boolean assetExists(String name) {
+        try { ctx.getAssets().open(name).close(); return true; }
+        catch (Exception e) { return false; }
+    }
+
     private static Bitmap rotate90(Bitmap src) {
         Matrix m = new Matrix();
         m.postRotate(90);
         return Bitmap.createBitmap(src, 0, 0, src.getWidth(), src.getHeight(), m, true);
     }
 
+    private void clearRot() {
+        if (rotCache != null && !rotCache.isRecycled()) rotCache.recycle();
+        rotCache = null;
+    }
+
+    // ---------------- 皮肤 ----------------
+
+    public void applySkin(int idx) {
+        if (idx < 0 || idx >= SKINS.length) return;
+        Skin s = SKINS[idx];
+        if (faceBmp != null && !faceBmp.isRecycled()) faceBmp.recycle();
+        faceBmp = null;
+        clearRot();
+        if (baseBmp != null && !baseBmp.isRecycled()) baseBmp.recycle();
+
+        skinIdx = idx;
+        faceCur = 0;
+        baseBmp = decode(s.base);
+
+        // 只认真正存在的表情文件 —— 这样素材没到齐也不会切到空白
+        faceOk = new boolean[s.faces.length];
+        for (int i = 0; i < s.faces.length; i++) faceOk[i] = assetExists(s.faces[i]);
+
+        cur = baseBmp;
+        if (cur != null) {
+            srcW = cur.getWidth();
+            srcH = cur.getHeight();
+            headX0 = Math.round(srcH - 1 - s.hy1 * srcH);
+            headX1 = Math.round(srcH - 1 - s.hy0 * srcH);
+            headY0 = Math.round(s.hx0 * srcW);
+            headY1 = Math.round(s.hx1 * srcW);
+        }
+        requestLayout();
+        invalidate();
+    }
+
+    public void cycleSkin() { applySkin((skinIdx + 1) % SKINS.length); }
+
+    public int skinCount() { return SKINS.length; }
+    public int currentSkin() { return skinIdx; }
+    public String skinName() { return SKINS[skinIdx].name; }
+    public String skinName(int i) { return (i >= 0 && i < SKINS.length) ? SKINS[i].name : ""; }
+
+    // ---------------- 表情 ----------------
+
+    public void setFace(int idx) {
+        Skin s = SKINS[skinIdx];
+        if (idx < 0 || idx > s.faces.length || idx == faceCur) return;
+        if (idx == 0) {
+            if (faceBmp != null && !faceBmp.isRecycled()) faceBmp.recycle();
+            faceBmp = null;
+            cur = baseBmp;
+        } else {
+            if (!faceOk[idx - 1]) return;
+            Bitmap b = decode(s.faces[idx - 1]);
+            if (b == null) return;
+            if (faceBmp != null && !faceBmp.isRecycled()) faceBmp.recycle();
+            faceBmp = b;
+            cur = b;
+        }
+        faceCur = idx;
+        clearRot();
+        invalidate();
+    }
+
+    public void cycleFace() {
+        int n = SKINS[skinIdx].faces.length;
+        for (int i = 1; i <= n; i++) {
+            int idx = (faceCur + i) % (n + 1);
+            if (idx == 0 || faceOk[idx - 1]) { setFace(idx); return; }
+        }
+    }
+
+    public int faceCount() {
+        int n = 0;
+        for (boolean b : faceOk) if (b) n++;
+        return n;
+    }
+
+    public int currentFace() { return faceCur; }
+
+    public void pokeFeedback() { tapNs = System.nanoTime(); invalidate(); }
+
     public void setListener(Listener l) { this.listener = l; }
+
+    // ---- 自动溜达：Service 挪窗口，这里只管"走路的样子" ----
+    private boolean walking = false;
+    private long lastTouchMs = System.currentTimeMillis();
+
+    public void setWalking(boolean w) {
+        if (walking != w) { walking = w; invalidate(); }
+    }
+
+    /** 距离上一次碰她过了多久（毫秒）—— 刚碰过就先别乱跑 */
+    public long msSinceTouch() { return System.currentTimeMillis() - lastTouchMs; }
+
+    public boolean isDragging() { return dragging; }
 
     public void setState(int s) {
         if (state != s) {
@@ -195,53 +307,13 @@ public class PetView extends View implements Choreographer.FrameCallback {
         else setMeasuredDimension(Math.round(perchWindowW()), Math.round(perchWindowH()));
     }
 
-    // ---------------- 表情：整张换图 ----------------
-
-    public void setFace(int idx) {
-        if (idx < 0 || idx >= FACE_FILES.length || idx == faceCur) return;
-        if (!faceOk[idx]) return;
-        if (idx == FACE_NORMAL) {
-            if (ownsCur && cur != null) cur.recycle();
-            cur = decode(FACE_FILES[0]);
-            ownsCur = false;
-        } else {
-            Bitmap b = decode(FACE_FILES[idx]);
-            if (b == null) return;
-            if (ownsCur && cur != null) cur.recycle();
-            cur = b;
-            ownsCur = true;
-        }
-        if (cur == null) return;
-        if (curRot != null) curRot.recycle();
-        curRot = rotate90(cur);
-        faceCur = idx;
-        invalidate();
-    }
-
-    public void cycleFace() {
-        for (int i = 1; i <= FACE_FILES.length; i++) {
-            int idx = (faceCur + i) % FACE_FILES.length;
-            if (faceOk[idx]) { setFace(idx); return; }
-        }
-    }
-
-    public int faceCount() {
-        int n = 0;
-        for (int i = 1; i < faceOk.length; i++) if (faceOk[i]) n++;
-        return n;
-    }
-
-    public int currentFace() { return faceCur; }
-
-    public void pokeFeedback() { tapNs = System.nanoTime(); invalidate(); }
-
     // ---------------- 绘制 ----------------
 
     @Override
     protected void onDraw(Canvas canvas) {
         if (cur == null) return;
         long now = System.nanoTime();
-        if (startNs == 0) { startNs = now; lastTouchNs = now; }
+        if (startNs == 0) { startNs = now; lastFrameNs = now; }
         float t = (now - startNs) / NS;
 
         final float tau = (float) (2 * Math.PI);
@@ -249,10 +321,18 @@ public class PetView extends View implements Choreographer.FrameCallback {
         pSx = 1f;
         pSy = 1f + 0.014f * ampScale * (float) Math.sin(tau * 2 * t / 2.4f);
 
-        if (sleepy) pDy += 0.045f;
         if (dragging) {
             pSx += 0.05f * Math.abs(dragTilt) / 9f;
             pSy -= 0.02f * Math.abs(dragTilt) / 9f;
+        }
+        if (walking) {
+            // 挪动时左右摇 + 上下颠。只平移不摇的话，看着像贴纸在滑，不像在走。
+            float wk = tau * t * 1.9f;
+            pDy += 0.016f * ampScale * Math.abs((float) Math.sin(wk));
+            pSy *= 1f + 0.018f * ampScale * (float) Math.sin(wk * 2f);
+            dragTilt = 5.5f * (float) Math.sin(wk);
+        } else if (!dragging) {
+            dragTilt = 0f;
         }
         if (tapNs != 0) {
             float k = (now - tapNs) / (0.30f * NS);
@@ -271,9 +351,9 @@ public class PetView extends View implements Choreographer.FrameCallback {
         float cx = ww / 2f;
         float bottom = hh - h * 0.08f + pDy * h;
         float top = bottom - h * pSy;
-        float left = cx - w * pSx / 2f;
-        RectF dst = new RectF(left, top, left + w * pSx, bottom);
+        float halfW = w * pSx / 2f;
 
+        RectF dst = new RectF(cx - halfW, top, cx + halfW, bottom);
         canvas.save();
         canvas.rotate(dragging ? dragTilt : 0f, cx, hh - h * 0.10f);
         canvas.drawBitmap(cur, null, dst, paint);
@@ -281,7 +361,8 @@ public class PetView extends View implements Choreographer.FrameCallback {
     }
 
     private void drawPerch(Canvas canvas, float t) {
-        if (curRot == null) return;
+        if (cur == null) return;
+        if (rotCache == null || rotCache.isRecycled()) rotCache = rotate90(cur);
         int bw = headX1 - headX0, bh = headY1 - headY0;
         float w = dp(perchWidthDp);
         float h = w * bh / (float) bw;
@@ -295,7 +376,7 @@ public class PetView extends View implements Choreographer.FrameCallback {
 
         canvas.save();
         if (mirrorX) canvas.scale(-1f, 1f, getWidth() / 2f, 0f);
-        canvas.drawBitmap(curRot, src, dst, paint);
+        canvas.drawBitmap(rotCache, src, dst, paint);
         canvas.restore();
     }
 
@@ -333,11 +414,6 @@ public class PetView extends View implements Choreographer.FrameCallback {
 
     // ---------------- 触摸 ----------------
 
-    private void wake() {
-        lastTouchNs = System.nanoTime();
-        if (sleepy) sleepy = false;
-    }
-
     @Override
     public boolean onTouchEvent(MotionEvent e) {
         float rx = e.getRawX(), ry = e.getRawY();
@@ -348,7 +424,7 @@ public class PetView extends View implements Choreographer.FrameCallback {
                 dragging = false;
                 longPressed = false;
                 dragTilt = 0f;
-                wake();
+                lastTouchMs = System.currentTimeMillis();
                 handler.postDelayed(longPressRun, LONG_PRESS_MS);
                 return true;
 
@@ -362,6 +438,7 @@ public class PetView extends View implements Choreographer.FrameCallback {
                     if (listener != null) listener.onDragStart();
                 }
                 if (dragging) {
+                    lastTouchMs = System.currentTimeMillis();
                     dragTilt = Math.max(-9f, Math.min(9f, dragTilt + (rx - lastRawX) * 0.35f));
                     dragTilt *= 0.85f;
                     if (listener != null) listener.onDrag(rx - lastRawX, ry - lastRawY);
@@ -373,7 +450,6 @@ public class PetView extends View implements Choreographer.FrameCallback {
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
                 handler.removeCallbacks(longPressRun);
-                wake();
                 if (dragging) {
                     dragging = false;
                     dragTilt = 0f;

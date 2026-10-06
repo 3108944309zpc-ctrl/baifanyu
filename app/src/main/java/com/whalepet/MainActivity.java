@@ -22,8 +22,8 @@ public class MainActivity extends Activity {
     private SharedPreferences prefs;
     private TextView tvStatus, tvHover, tvPerch, tvAmp;
     private SeekBar sbHover, sbPerch, sbAmp;
-    private Button btnPerm, btnToggle, btnFace;
-    private Switch swSound;
+    private Button btnPerm, btnToggle, btnFace, btnSkin;
+    private Switch swSound, swWander;
 
     private static final String[] FACE_ASSETS = {
             "face_happy.png", "face_sad.png", "face_angry.png",
@@ -46,6 +46,20 @@ public class MainActivity extends Activity {
         btnToggle = findViewById(R.id.btnToggle);
         btnFace = findViewById(R.id.btnFace);
         btnFace.setOnClickListener(v -> sendAction(PetService.ACTION_NEXT_FACE));
+
+        btnSkin = findViewById(R.id.btnSkin);
+        btnSkin.setOnClickListener(v -> {
+            int n = (prefs.getInt(PetService.KEY_SKIN, 0) + 1) % PetView.SKINS.length;
+            prefs.edit().putInt(PetService.KEY_SKIN, n).apply();
+            btnSkin.setText(skinLabel(n));
+            refreshService();
+        });
+
+        swWander = findViewById(R.id.swWander);
+        swWander.setOnCheckedChangeListener((sw, checked) -> {
+            prefs.edit().putBoolean(PetService.KEY_WANDER, checked).apply();
+            refreshService();
+        });
 
         swSound = findViewById(R.id.swSound);
         swSound.setOnCheckedChangeListener((sw, checked) -> {
@@ -101,6 +115,10 @@ public class MainActivity extends Activity {
         super.onPause();
     }
 
+    private String skinLabel(int idx) {
+        return "皮肤：" + PetView.SKINS[idx % PetView.SKINS.length].name + "　▸ 点击切换";
+    }
+
     private void sendBool(String action, String key, boolean value) {
         if (!prefs.getBoolean(PetService.KEY_RUNNING, false)) return;
         Intent i = new Intent(this, PetService.class).setAction(action).putExtra(key, value);
@@ -122,6 +140,11 @@ public class MainActivity extends Activity {
 
         boolean snd = prefs.getBoolean(PetService.KEY_SOUND, true);
         if (swSound.isChecked() != snd) swSound.setChecked(snd);   // 先判断再设，避免回调绕圈
+        boolean wdr = prefs.getBoolean(PetService.KEY_WANDER, true);
+        if (swWander.isChecked() != wdr) swWander.setChecked(wdr);
+
+        int ski = prefs.getInt(PetService.KEY_SKIN, 0);
+        btnSkin.setText(skinLabel(ski));
 
         boolean overlay = hasOverlay();
         boolean running = prefs.getBoolean(PetService.KEY_RUNNING, false);

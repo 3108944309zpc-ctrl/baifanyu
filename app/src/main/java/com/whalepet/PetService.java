@@ -27,6 +27,7 @@ import android.widget.Toast;
 
 import java.util.Random;
 
+
 /**
  * 前台服务 + 悬浮窗。
  *
@@ -43,6 +44,7 @@ public class PetService extends Service implements PetView.Listener {
     public static final String ACTION_NEXT_FACE = "com.whalepet.NEXT_FACE";
     public static final String ACTION_FACE_COUNT = "com.whalepet.FACE_COUNT";
     public static final String ACTION_SET_HIDDEN = "com.whalepet.SET_HIDDEN";
+    public static final String ACTION_NEXT_SKIN = "com.whalepet.NEXT_SKIN";
     public static final String EXTRA_COUNT = "count";
     public static final String EXTRA_HIDDEN = "hidden";
 
@@ -61,6 +63,8 @@ public class PetService extends Service implements PetView.Listener {
     public static final String KEY_PERCH_W = "perch_width_dp";
     public static final String KEY_AMP = "amp_scale";
     public static final String KEY_SOUND = "sound_on";
+    public static final String KEY_SKIN = "skin_index";
+    public static final String KEY_WANDER = "wander_on";
     public static final String KEY_RUNNING = "running";
     public static final String KEY_EDGE = "edge";
     public static final String KEY_PERCHED = "perched";
@@ -139,6 +143,13 @@ public class PetService extends Service implements PetView.Listener {
             applySizes();
             return START_STICKY;
         }
+        if (ACTION_NEXT_SKIN.equals(action)) {
+            int n = (prefs.getInt(KEY_SKIN, 0) + 1) % PetView.SKINS.length;
+            prefs.edit().putInt(KEY_SKIN, n).apply();
+            if (view != null) view.applySkin(n);
+            else if (prefs.getBoolean(KEY_RUNNING, false)) addPet();
+            return START_STICKY;
+        }
         if (ACTION_NEXT_FACE.equals(action)) {
             if (view != null) {
                 view.cycleFace();
@@ -185,6 +196,7 @@ public class PetService extends Service implements PetView.Listener {
         handler.removeCallbacksAndMessages(null);
         hideMenu();
         removePet();
+        wanderHandler.removeCallbacks(wanderTick);
         if (soundPool != null) { soundPool.release(); soundPool = null; }
         try { unregisterReceiver(screenRx); } catch (Exception ignored) { }
         super.onDestroy();
@@ -252,11 +264,18 @@ public class PetService extends Service implements PetView.Listener {
         view.setPerchWidthDp(prefs.getFloat(KEY_PERCH_W, DEFAULT_PERCH_W));
         view.setAmpScale(prefs.getFloat(KEY_AMP, DEFAULT_AMP));
         soundOn = prefs.getBoolean(KEY_SOUND, true);
+        wanderOn = prefs.getBoolean(KEY_WANDER, true);
+        int sk = prefs.getInt(KEY_SKIN, 0);
+        if (sk != view.currentSkin()) view.applySkin(sk);
         applyLayout();
     }
 
     private void applyLayout() {
         if (view == null || lp == null) return;
+        if (!wanderStarted) {                 // 窗口一就位就把溜达的定时器挂上
+            wanderStarted = true;
+            wanderHandler.postDelayed(wanderTick, 4000);
+        }
         if (view.getState() == PetView.STATE_HOVER) {
             lp.width = Math.round(view.windowW());
             lp.height = Math.round(view.windowH());
@@ -298,6 +317,18 @@ public class PetService extends Service implements PetView.Listener {
         row.setPadding(pad, pad, pad, pad);
         row.setElevation(dp(6));
 
+        row.addView(menuButton("皮肤：" + PetView.SKINS[prefs.getInt(KEY_SKIN, 0) % PetView.SKINS.length].name,
+                new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                int n = (prefs.getInt(KEY_SKIN, 0) + 1) % PetView.SKINS.length;
+                prefs.edit().putInt(KEY_SKIN, n).apply();
+                ((TextView) v).setText("皮肤：" + PetView.SKINS[n].name);
+                applySizes();          // 两套皮肤的宽高比不同，换完要重新量窗口
+                // 换一次就重新计时，方便连着点着挑
+                handler.removeCallbacks(menuAutoHide);
+                handler.postDelayed(menuAutoHide, MENU_AUTO_HIDE_MS);
+            }
+        }));
         row.addView(menuButton("设置", new View.OnClickListener() {
             @Override public void onClick(View v) { hideMenu(); openSettings(); }
         }));
@@ -453,6 +484,58 @@ public class PetService extends Service implements PetView.Listener {
     }
 
     // ---- 通知 ----
+
+    // ---------------- 自动溜达 ----------------
+    // 她的位置是"窗口位置"，只有 Service 能动。所以这里挪窗口，
+    // 同时告诉 View "正在走"（由 View 加摇晃和颠簸）。
+    private boolean wanderOn = true;
+    private final Handler wanderHandler = new Handler(Looper.getMainLooper());
+    private float wanderX = 0f, wanderTargetX = -1f;
+    private long wanderWaitUntil = 0L;
+    private boolean wanderStarted = false;
+
+    private final Runnable wanderTick = new Runnable() {
+        @Override public void run() {
+            if (!wanderOn || view == null || lp == null) return;
+            if (!prefs.getBoolean(KEY_RUNNING, false)) return;
+            // 趴边 / 正在被拖 / 刚被碰过 —— 都不动
+            if (view.getState() != PetView.STATE_HOVER
+                    || view.isDragging() || view.msSinceTouch() < 5000) {
+                view.setWalking(false);
+                wanderHandler.postDelayed(this, 300);
+                return;
+            }
+            long now = System.currentTimeMillis();
+            if (now < wanderWaitUntil) {
+                view.setWalking(false);
+                wanderHandler.postDelayed(this, 150);
+                return;
+            }
+            if (wanderTargetX < 0f) {                 // 挑一个新目标
+                wanderX = lp.x;
+                int margin = Math.round(dp(14));
+                int hi = Math.max(margin + 1, screenW - lp.width - margin);
+                wanderTargetX = margin + rnd.nextInt(hi - margin);
+                wanderWaitUntil = now + 800;
+                wanderHandler.postDelayed(this, 150);
+                return;
+            }
+            float d = wanderTargetX - wanderX;
+            if (Math.abs(d) < 3f) {                   // 到站，歇一会儿
+                wanderX = wanderTargetX;
+                wanderTargetX = -1f;
+                wanderWaitUntil = now + 1200 + rnd.nextInt(2400);
+                view.setWalking(false);
+                wanderHandler.postDelayed(this, 120);
+                return;
+            }
+            wanderX += Math.signum(d) * Math.min(4f, Math.abs(d));
+            lp.x = Math.round(wanderX);
+            try { wm.updateViewLayout(view, lp); } catch (Exception ignored) { }
+            view.setWalking(true);
+            wanderHandler.postDelayed(this, 16);
+        }
+    };
 
     private void createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
