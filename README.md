@@ -54,9 +54,19 @@
 
 ---
 
-## Mac OS版本：https://github.com/duhaoze2007/Baifanyu-For-Mac
+## 其他平台
 
-## 项目网站：https://baifanyuformac.jackdu.cloud
+原版是 Android。社区把它移植到了桌面端，两套皮肤和 14 个表情都搬了过去：
+
+| 平台 | 仓库 | 说明 |
+|---|---|---|
+| **Windows** | [duhaoze2007/Baifanyu-For-Win](https://github.com/duhaoze2007/Baifanyu-For-Win) | 原生 C++，编译出来是一个 \.exe\ |
+| **macOS** | [duhaoze2007/Baifanyu-For-Mac](https://github.com/duhaoze2007/Baifanyu-For-Mac) | 原生 Swift，浮在全屏窗口之上 |
+
+macOS 版还有一个[介绍网站](https://baifanyuformac.jackdu.cloud)。
+
+谢谢 [@duhaoze2007](https://github.com/duhaoze2007) —— 他们还加了几个原版没有的东西：
+鼠标停在她身上会停下来并弹出日期和时钟，没人理她的时候她会自己换个表情。
 
 ---
 
