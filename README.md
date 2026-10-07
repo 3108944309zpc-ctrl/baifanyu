@@ -163,3 +163,7 @@ tools/
 
 代码采用 **MIT License**，详见 [LICENSE](LICENSE)。
 美术资源（`app/src/main/assets/`、`docs/`、`app/src/main/res/mipmap-*`）**不在 MIT 范围内**，仅限个人非商业使用。
+
+
+## 音效诊断版
+本版本增加“音效诊断 / 测试”按钮，会显示 sound_on、3 个 WAV 的 SoundPool 加载状态，以及媒体/系统音效音量，用于排查 Android/HyperOS 音频通道问题。

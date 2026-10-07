@@ -282,6 +282,16 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content" />
 
+            <Button
+                android:id="@+id/btnSoundDiag"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/btn_ghost"
+                android:text="音效诊断 / 测试"
+                android:textColor="@color/ink"
+                android:textSize="14sp" />
+
         </LinearLayout>
 
         <!-- 用法 -->
