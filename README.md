@@ -33,7 +33,7 @@
 | | 负责 |
 |---|---|
 | **[@LIN428924379](https://github.com/LIN428924379)** | 原作者 —— 角色设定、美术、交互设计、**Android 版** |
-| **[@duhaoze2007](https://github.com/duhaoze2007)** | **Windows 版与 macOS 版** —— 用原生 C++ / Swift 重写，并额外做了悬停气泡、自动换表情、菜单栏图标等功能 |
+| **[@duhaoze2007](https://github.com/duhaoze2007)** | **Windows 版、macOS 版与官网** —— 用原生 C++ / Swift 重写，并额外做了悬停气泡、自动换表情、菜单栏图标等功能 |
 
 「白饭鱼」现在是一个项目、多个平台：Android 版由原作者独立完成，桌面端移植由社区独立维护。
 三份实现共用同一套角色和美术资源，交互设计一脉相承。
@@ -79,7 +79,7 @@
 
 macOS 版有一个[介绍网站](https://baifanyu.jackdu.cloud)，中英繁体三语，写了安装步骤、和安卓版的技术对照，也照实列了已知问题。
 
-谢谢 [@duhaoze2007](https://github.com/duhaoze2007) —— 他们还加了几个原版没有的东西：
+谢谢 [@duhaoze2007](https://github.com/duhaoze2007) —— 他一个人做了 Windows 版、macOS 版和官网，还加了几个原版没有的东西：
 鼠标停在她身上会停下来并弹出日期和时钟，没人理她的时候她会自己换个表情。
 
 ---
