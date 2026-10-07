@@ -61,9 +61,9 @@
 | 平台 | 仓库 | 说明 |
 |---|---|---|
 | **Windows** | [duhaoze2007/Baifanyu-For-Win](https://github.com/duhaoze2007/Baifanyu-For-Win) | 原生 C++，编译出来是一个 `.exe` |
-| **macOS** | [duhaoze2007/Baifanyu-For-Mac](https://github.com/duhaoze2007/Baifanyu-For-Mac) | 原生 Swift，浮在全屏窗口之上 |
+| **macOS** | [duhaoze2007/Baifanyu-For-Mac](https://github.com/duhaoze2007/Baifanyu-For-Mac) | 原生 Swift，浮在全屏窗口之上 · **[介绍网站](https://baifanyuformac.jackdu.cloud)** |
 
-macOS 版还有一个[介绍网站](https://baifanyuformac.jackdu.cloud)。
+macOS 版有一个[介绍网站](https://baifanyuformac.jackdu.cloud)，中英繁体三语，写了安装步骤、和安卓版的技术对照，也照实列了已知问题。
 
 谢谢 [@duhaoze2007](https://github.com/duhaoze2007) —— 他们还加了几个原版没有的东西：
 鼠标停在她身上会停下来并弹出日期和时钟，没人理她的时候她会自己换个表情。
