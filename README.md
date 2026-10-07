@@ -60,7 +60,7 @@
 
 | 平台 | 仓库 | 说明 |
 |---|---|---|
-| **Windows** | [duhaoze2007/Baifanyu-For-Win](https://github.com/duhaoze2007/Baifanyu-For-Win) | 原生 C++，编译出来是一个 \.exe\ |
+| **Windows** | [duhaoze2007/Baifanyu-For-Win](https://github.com/duhaoze2007/Baifanyu-For-Win) | 原生 C++，编译出来是一个 `.exe` |
 | **macOS** | [duhaoze2007/Baifanyu-For-Mac](https://github.com/duhaoze2007/Baifanyu-For-Mac) | 原生 Swift，浮在全屏窗口之上 |
 
 macOS 版还有一个[介绍网站](https://baifanyuformac.jackdu.cloud)。
