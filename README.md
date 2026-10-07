@@ -54,6 +54,12 @@
 
 ---
 
+## Mac OS版本：https://github.com/duhaoze2007/Baifanyu-For-Mac
+
+## 项目网站：https://baifanyuformac.jackdu.cloud
+
+---
+
 ## 自己编译
 
 需要：**JDK 17** + **Android SDK（compileSdk 36）**
@@ -163,10 +169,3 @@ tools/
 
 代码采用 **MIT License**，详见 [LICENSE](LICENSE)。
 美术资源（`app/src/main/assets/`、`docs/`、`app/src/main/res/mipmap-*`）**不在 MIT 范围内**，仅限个人非商业使用。
-
----
-
-## 相关网站
-Mac OS版本：https://github.com/duhaoze2007/Baifanyu-For-Mac
-
-项目网站：https://baifanyuformac.jackdu.cloud
