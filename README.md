@@ -74,8 +74,10 @@
 
 | 平台 | 仓库 | 说明 |
 |---|---|---|
-| **Windows** | [duhaoze2007/Baifanyu-For-Win](https://github.com/duhaoze2007/Baifanyu-For-Win) | 原生 C++，编译出来是一个 `.exe` |
-| **macOS** | [duhaoze2007/Baifanyu-For-Mac](https://github.com/duhaoze2007/Baifanyu-For-Mac) | 原生 Swift，浮在全屏窗口之上 · **[介绍网站](https://baifanyu.jackdu.cloud)** |
+| **Windows** | [duhaoze2007/Baifanyu-For-Win](https://github.com/duhaoze2007/Baifanyu-For-Win) | 原生 C++，Release 里有编译好的 `.exe`，**下载即用** |
+| **macOS** | [duhaoze2007/Baifanyu-For-Mac](https://github.com/duhaoze2007/Baifanyu-For-Mac) | 原生 Swift，Release 里有 `.dmg`，**下载即用** · [介绍网站](https://baifanyu.jackdu.cloud) |
+
+两个桌面版都**提供了预编译包，不用自己编译** —— 想自己编也行，仓库里带了 `build.sh` / `build.bat`。
 
 macOS 版有一个[介绍网站](https://baifanyu.jackdu.cloud)，中英繁体三语，写了安装步骤、和安卓版的技术对照，也照实列了已知问题。
 
