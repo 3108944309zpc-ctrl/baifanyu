@@ -22,7 +22,7 @@ public class MainActivity extends Activity {
     private SharedPreferences prefs;
     private TextView tvStatus, tvHover, tvPerch, tvAmp;
     private SeekBar sbHover, sbPerch, sbAmp;
-    private Button btnPerm, btnToggle, btnFace, btnSkin;
+    private Button btnPerm, btnToggle, btnFace, btnSkin, btnSoundDiag;
     private Switch swSound, swWander;
 
     private static final String[] FACE_ASSETS = {
@@ -46,6 +46,9 @@ public class MainActivity extends Activity {
         btnToggle = findViewById(R.id.btnToggle);
         btnFace = findViewById(R.id.btnFace);
         btnFace.setOnClickListener(v -> sendAction(PetService.ACTION_NEXT_FACE));
+
+        btnSoundDiag = findViewById(R.id.btnSoundDiag);
+        btnSoundDiag.setOnClickListener(v -> sendAction(PetService.ACTION_SOUND_DIAG));
 
         btnSkin = findViewById(R.id.btnSkin);
         btnSkin.setOnClickListener(v -> {

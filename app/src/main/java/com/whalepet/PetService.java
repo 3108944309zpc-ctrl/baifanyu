@@ -13,6 +13,7 @@ import android.content.SharedPreferences;
 import android.graphics.PixelFormat;
 import android.graphics.drawable.GradientDrawable;
 import android.media.AudioAttributes;
+import android.media.AudioManager;
 import android.media.SoundPool;
 import android.os.Build;
 import android.os.Handler;
@@ -43,6 +44,7 @@ public class PetService extends Service implements PetView.Listener {
     public static final String ACTION_REFRESH = "com.whalepet.REFRESH";
     public static final String ACTION_NEXT_FACE = "com.whalepet.NEXT_FACE";
     public static final String ACTION_FACE_COUNT = "com.whalepet.FACE_COUNT";
+    public static final String ACTION_SOUND_DIAG = "com.whalepet.SOUND_DIAG";
     public static final String ACTION_SET_HIDDEN = "com.whalepet.SET_HIDDEN";
     public static final String ACTION_NEXT_SKIN = "com.whalepet.NEXT_SKIN";
     public static final String EXTRA_COUNT = "count";
@@ -56,7 +58,21 @@ public class PetService extends Service implements PetView.Listener {
     private SoundPool soundPool;
     private final int[] duckIds = new int[3];
     private boolean soundOn = true;
+    private final int[] duckLoadStatus = new int[] { -999, -999, -999 };
     private final Random rnd = new Random();
+    /** 静音提示的节流时间戳，避免连点时刷屏 */
+    private long lastSilentHintMs = 0L;
+
+    /**
+     * 音效走哪条音频流 —— 必须走媒体音量（STREAM_MUSIC）。
+     *
+     * 以前这里是 USAGE_ASSISTANCE_SONIFICATION，它在 AudioService 里被映射成
+     * STREAM_SYSTEM（"系统音效"）。MIUI / HyperOS 上那条通道在静音模式下会被压到 0，
+     * 用户把"系统音效/触摸提示音"关掉后它也是 0 —— 结果就是 SoundPool.play()
+     * 返回成功、但一点声音都没有，而媒体音量明明是正常的。
+     * 表现完全就是"点她有反应、就是不出声"。
+     */
+    private static final int SOUND_STREAM = AudioManager.STREAM_MUSIC;
 
     public static final String PREFS = "whalepet";
     public static final String KEY_HOVER_H = "hover_height_dp";
@@ -113,14 +129,8 @@ public class PetService extends Service implements PetView.Listener {
         createChannel();
 
         soundOn = prefs.getBoolean(KEY_SOUND, true);
-        soundPool = new SoundPool.Builder().setMaxStreams(3).setAudioAttributes(
-                new AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .build()).build();
-        duckIds[0] = soundPool.load(this, R.raw.duck1, 1);
-        duckIds[1] = soundPool.load(this, R.raw.duck2, 1);
-        duckIds[2] = soundPool.load(this, R.raw.duck3, 1);
+        createSoundPool();
+        loadDuckSounds();
 
         IntentFilter f = new IntentFilter();
         f.addAction(Intent.ACTION_SCREEN_OFF);
@@ -141,6 +151,10 @@ public class PetService extends Service implements PetView.Listener {
         }
         if (ACTION_REFRESH.equals(action)) {
             applySizes();
+            return START_STICKY;
+        }
+        if (ACTION_SOUND_DIAG.equals(action)) {
+            runSoundDiagnostic();
             return START_STICKY;
         }
         if (ACTION_NEXT_SKIN.equals(action)) {
@@ -259,12 +273,15 @@ public class PetService extends Service implements PetView.Listener {
     }
 
     private void applySizes() {
+        // 这两个开关跟"她在不在窗口里"无关，必须先更新。
+        // 设置页打开时她已经从窗口移除（view == null），以前的写法会在这里提前
+        // return，于是拨动音效开关后 soundOn 一直是旧值 —— 开关看着像失灵。
+        soundOn = prefs.getBoolean(KEY_SOUND, true);
+        wanderOn = prefs.getBoolean(KEY_WANDER, true);
         if (view == null || lp == null) return;
         view.setHoverHeightDp(prefs.getFloat(KEY_HOVER_H, DEFAULT_HOVER_H));
         view.setPerchWidthDp(prefs.getFloat(KEY_PERCH_W, DEFAULT_PERCH_W));
         view.setAmpScale(prefs.getFloat(KEY_AMP, DEFAULT_AMP));
-        soundOn = prefs.getBoolean(KEY_SOUND, true);
-        wanderOn = prefs.getBoolean(KEY_WANDER, true);
         int sk = prefs.getInt(KEY_SKIN, 0);
         if (sk != view.currentSkin()) view.applySkin(sk);
         applyLayout();
@@ -471,16 +488,152 @@ public class PetService extends Service implements PetView.Listener {
         else applyLayout();
     }
 
-    /** 单击换表情在 PetView 里做；这里负责音效和缺素材时的兜底提示 */
+    /**
+     * 单击换表情在 PetView 里做；这里负责音效和缺素材时的兜底提示。
+     */
     @Override
     public void onTap() {
-        if (soundOn && soundPool != null) {
-            int id = duckIds[rnd.nextInt(duckIds.length)];
-            if (id != 0) soundPool.play(id, 1f, 1f, 1, 0, 1f);
-        }
         if (view != null && view.faceCount() == 0) {
             Toast.makeText(this, "表情素材没加载成功", Toast.LENGTH_SHORT).show();
         }
+        if (!soundOn) return;
+        playDuckAndWarn();
+    }
+
+    // ---- 音效 ----
+
+    /**
+     * 音效池。USAGE_MEDIA → STREAM_MUSIC（媒体音量）。
+     *
+     * 这里以前是 USAGE_ASSISTANCE_SONIFICATION，它落在 STREAM_SYSTEM。
+     * MIUI / HyperOS 上"系统音效"那条通道在静音模式、或用户关掉触摸提示音后是 0，
+     * 于是 play() 返回成功却完全没声音 —— 正是"点她有反应、就是不出声"。
+     */
+    private void createSoundPool() {
+        soundPool = new SoundPool.Builder()
+                .setMaxStreams(3)
+                .setAudioAttributes(new AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build())
+                .build();
+        soundPool.setOnLoadCompleteListener((pool, sampleId, status) -> {
+            for (int i = 0; i < duckIds.length; i++) {
+                if (duckIds[i] == sampleId) duckLoadStatus[i] = status;
+            }
+            android.util.Log.d("WhalePetAudio", "loadComplete sample=" + sampleId
+                    + " status=" + status);
+        });
+    }
+
+    /** load() 是异步的，这里返回 0 说明这一步就失败了 —— 下次点击会再试一次 */
+    private void loadDuckSounds() {
+        if (soundPool == null) return;
+        duckIds[0] = soundPool.load(this, R.raw.duck1, 1);
+        duckIds[1] = soundPool.load(this, R.raw.duck2, 1);
+        duckIds[2] = soundPool.load(this, R.raw.duck3, 1);
+        android.util.Log.d("WhalePetAudio", "load ids="
+                + duckIds[0] + "," + duckIds[1] + "," + duckIds[2]);
+    }
+
+    /**
+     * 随机播一声鸭子叫，返回 SoundPool.play() 的 streamId（0 = 没播出去）。
+     * 采样还没 load 完时补一次 load —— 否则刚启动那几下点击是哑的。
+     */
+    private int playDuckSound() {
+        if (soundPool == null) return 0;
+        int id = duckIds[rnd.nextInt(duckIds.length)];
+        if (id == 0) {
+            loadDuckSounds();
+            return 0;
+        }
+        int streamId = soundPool.play(id, 1f, 1f, 1, 0, 1f);
+        android.util.Log.d("WhalePetAudio", "tap sample=" + id + " streamId=" + streamId
+                + " soundOn=" + soundOn + " " + volumeReport());
+        if (streamId == 0) loadDuckSounds();
+        return streamId;
+    }
+
+    private void playDuckAndWarn() {
+        int streamId = playDuckSound();
+        AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
+        if (am == null) return;
+        int vol = am.getStreamVolume(SOUND_STREAM);
+        boolean muted = false;
+        try { muted = am.isStreamMute(SOUND_STREAM); } catch (Exception ignored) { }
+        // 只有确实查出问题才提示；正常出声时保持安静
+        if (streamId != 0 && !muted && vol > 0) return;
+        hintSilent(streamId, vol, muted);
+    }
+
+    /**
+     * 没响的时候把原因直接说清楚，别让用户对着一个哑巴开关发呆。
+     * 一分钟最多提示一次，免得连点时刷屏。
+     */
+    private void hintSilent(int streamId, int vol, boolean muted) {
+        long now = System.currentTimeMillis();
+        if (now - lastSilentHintMs < 60_000L) return;
+        lastSilentHintMs = now;
+
+        String why;
+        if (streamId == 0) {
+            why = "音效还没加载好，再点一下试试";
+        } else if (muted) {
+            why = "媒体音量被静音了 —— 关掉静音模式，或关掉 MIUI「静音时同时静音媒体」";
+        } else if (vol <= 0) {
+            why = "媒体音量是 0，按一下音量键调大就有声了";
+        } else {
+            why = "声音已经送出去了，检查是不是连着蓝牙耳机";
+        }
+        Toast.makeText(this, "鸭子叫没响：" + why, Toast.LENGTH_LONG).show();
+    }
+
+    private String volumeReport() {
+        AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
+        if (am == null) return "audio=null";
+        StringBuilder sb = new StringBuilder("stream=").append(SOUND_STREAM)
+                .append(" vol=").append(am.getStreamVolume(SOUND_STREAM))
+                .append('/').append(am.getStreamMaxVolume(SOUND_STREAM));
+        try {
+            sb.append(" muted=").append(am.isStreamMute(SOUND_STREAM));
+        } catch (Exception ignored) { }
+        sb.append(" ringer=").append(am.getRingerMode());
+        return sb.toString();
+    }
+
+    /**
+     * 音效诊断：先真的播一声（数字看不出问题，听得到才算数），
+     * 再把音频通道 / 音量 / 静音状态 / 本次播放结果一起报出来。
+     */
+    private void runSoundDiagnostic() {
+        AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
+        int streamId = playDuckSound();
+
+        int vol = am == null ? -1 : am.getStreamVolume(SOUND_STREAM);
+        int volMax = am == null ? -1 : am.getStreamMaxVolume(SOUND_STREAM);
+        boolean muted = false;
+        try { muted = am != null && am.isStreamMute(SOUND_STREAM); } catch (Exception ignored) { }
+        int ringer = am == null ? -1 : am.getRingerMode();
+        String ringerText = ringer == AudioManager.RINGER_MODE_SILENT ? "静音"
+                : ringer == AudioManager.RINGER_MODE_VIBRATE ? "震动" : "正常";
+
+        String msg = "音效诊断\n"
+                + "sound_on=" + soundOn
+                + "　加载=" + duckLoadStatus[0] + "," + duckLoadStatus[1] + "," + duckLoadStatus[2] + "\n"
+                + "音频通道=媒体音量(STREAM_MUSIC)\n"
+                + "媒体音量=" + vol + "/" + volMax + (muted ? "（已被系统静音）" : "") + "\n"
+                + "铃声模式=" + ringerText + "\n"
+                + "本次播放=" + (streamId == 0 ? "失败" : "成功 streamId=" + streamId) + "\n"
+                + diagAdvice(streamId, vol, muted);
+        android.util.Log.d("WhalePetAudio", msg.replace('\n', ' '));
+        Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
+    }
+
+    private String diagAdvice(int streamId, int vol, boolean muted) {
+        if (streamId == 0) return "→ 音效没加载完或加载失败，再点一次";
+        if (muted) return "→ 媒体通道被静音：关静音模式 / 关 MIUI「静音时同时静音媒体」";
+        if (vol <= 0) return "→ 媒体音量是 0：按音量键调大";
+        return "→ 通道与音量都正常。若仍听不到，看是否连着蓝牙耳机";
     }
 
     // ---- 通知 ----
