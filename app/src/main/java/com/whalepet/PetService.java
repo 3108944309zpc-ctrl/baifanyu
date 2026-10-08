@@ -268,6 +268,8 @@ public class PetService extends Service implements PetView.Listener {
             lp.x = prefs.getInt(KEY_X, lp.x);
             applyLayout();
         }
+        // 定时器状态按当前开关重建，杜绝"开关关了还爬"
+        restartWander();
         return true;
     }
 
@@ -291,8 +293,12 @@ public class PetService extends Service implements PetView.Listener {
         // 这两个开关跟"她在不在窗口里"无关，必须先更新。
         // 设置页打开时她已经从窗口移除（view == null），以前的写法会在这里提前
         // return，于是拨动音效开关后 soundOn 一直是旧值 —— 开关看着像失灵。
+        boolean prevWander = wanderOn;
         soundOn = prefs.getBoolean(KEY_SOUND, true);
         wanderOn = prefs.getBoolean(KEY_WANDER, true);
+        // 开关动过就重挂一次定时器 —— 不重挂的话，那个 tick 一旦退出就再也回不来，
+        // 表现为"关了还爬"或者"开了不爬"。
+        if (wanderOn != prevWander) restartWander();
         if (view == null || lp == null) return;
         view.setHoverHeightDp(prefs.getFloat(KEY_HOVER_H, DEFAULT_HOVER_H));
         view.setPerchWidthDp(prefs.getFloat(KEY_PERCH_W, DEFAULT_PERCH_W));
@@ -749,6 +755,25 @@ public class PetService extends Service implements PetView.Listener {
             wanderHandler.postDelayed(this, 16);
         }
     };
+
+    /**
+     * 按当前开关重新挂一次溜达定时器。
+     *
+     * wanderTick 退出时不会再排下一次（这是有意的：关掉就该停），
+     * 但那样一来它就无法自己恢复 —— 必须由外部重新挂上。
+     */
+    private void restartWander() {
+        wanderHandler.removeCallbacks(wanderTick);
+        wanderStarted = false;
+        if (!wanderOn) {
+            if (view != null) view.setWalking(false);   // 立刻停下，别等下一次 tick
+            return;
+        }
+        if (view != null && lp != null) {
+            wanderStarted = true;
+            wanderHandler.postDelayed(wanderTick, 4000);
+        }
+    }
 
     private void createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
