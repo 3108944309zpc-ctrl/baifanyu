@@ -155,6 +155,13 @@ public class PetService extends Service implements PetView.Listener {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        // intent == null 说明是系统把服务"粘性重启"了（START_STICKY）。
+        // 以前这里默认按 ACTION_SHOW 走 —— 于是用户从最近任务里划掉 App 之后，
+        // 过一阵系统把服务拉起来，她又自己冒出来了（网友反馈过"开游戏加载时她会出现"）。
+        if (intent == null && !prefs.getBoolean(KEY_RUNNING, false)) {
+            stopSelf();
+            return START_NOT_STICKY;
+        }
         String action = intent == null ? ACTION_SHOW : intent.getAction();
         startForeground(NOTI_ID, buildNotification());
 
@@ -226,6 +233,18 @@ public class PetService extends Service implements PetView.Listener {
             enterPerch(prefs.getInt(KEY_EDGE, 0) == 1, false);
         }
         return START_STICKY;
+    }
+
+    /**
+     * 用户从「最近任务」里划掉了 App —— 这是明确的"我不要它跑"。
+     * 真的收起来，别让系统过一会儿把服务拉起来、她又冒出来。
+     */
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        prefs.edit().putBoolean(KEY_RUNNING, false).apply();
+        removePet();
+        stopSelf();
+        super.onTaskRemoved(rootIntent);
     }
 
     @Override
