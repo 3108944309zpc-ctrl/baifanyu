@@ -268,7 +268,7 @@ tools/
 
 - **角色形象**：DeepSeek 拟人化的鲸鱼娘，出自社区创作
 - **立绘与表情**：由可灵 AI / 即梦 AI 生成，作者后期对齐去背
-- **音效**：小黄鸭叫声来自 [Mixkit](https://mixkit.co/free-sound-effects/duck/)（Mixkit Free License，免费商用、无需署名）
+- **音效**：小黄鸭叫声来自 [站长素材 · 音效频道](https://sc.chinaz.com/yinxiao/211016332723.htm)（免费下载，具体授权见该站说明）；`tools/make_duck.py` 是早期用代码合成的版本，留作参考
 
 > ⚠️ **注意**：角色的美术资源属于社区同人创作，**本项目的开源许可只覆盖代码**，美术资源请勿商用。
 
