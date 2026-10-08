@@ -80,6 +80,7 @@ public class PetService extends Service implements PetView.Listener {
     public static final String KEY_AMP = "amp_scale";
     public static final String KEY_SOUND = "sound_on";
     public static final String KEY_SKIN = "skin_index";
+    public static final String KEY_X = "pos_x";
     public static final String KEY_WANDER = "wander_on";
     public static final String KEY_RUNNING = "running";
     public static final String KEY_EDGE = "edge";
@@ -253,9 +254,19 @@ public class PetService extends Service implements PetView.Listener {
             view = null;
             return false;
         }
+        // 恢复上次的样子。不恢复的话，从设置页回来她会变成一个
+        // "站在屏幕正中间、默认皮肤、默认表情"的新人 —— 趴边状态也会丢。
+        int sk = prefs.getInt(KEY_SKIN, 0);
+        if (sk > 0 && sk < PetView.SKINS.length) view.applySkin(sk);
         if (pendingFace != 0) {
             view.setFace(pendingFace);
             pendingFace = 0;
+        }
+        if (prefs.getBoolean(KEY_PERCHED, false)) {
+            enterPerch(prefs.getInt(KEY_EDGE, 0) == 1, false);   // 她本来是扒在边上的
+        } else {
+            lp.x = prefs.getInt(KEY_X, lp.x);
+            applyLayout();
         }
         return true;
     }
@@ -265,6 +276,8 @@ public class PetService extends Service implements PetView.Listener {
             try { wm.removeView(view); } catch (Exception ignored) { }
         }
         view = null;
+        // 不重置的话，她回来之后自动溜达的定时器永远不会重新挂上
+        wanderStarted = false;
     }
 
     private boolean canDrawOverlays() {
@@ -514,7 +527,7 @@ public class PetService extends Service implements PetView.Listener {
     @Override
     public void onDragEnd(float rawX, float rawY) {
         if (view == null) return;
-        prefs.edit().putInt(KEY_Y, lp.y).apply();
+        prefs.edit().putInt(KEY_Y, lp.y).putInt(KEY_X, lp.x).apply();
         if (view.getState() == PetView.STATE_PERCH) {
             // 兜底：松手时还停在趴边态，就确保她贴回边上（上下位置保留）
             perchPull = 0;

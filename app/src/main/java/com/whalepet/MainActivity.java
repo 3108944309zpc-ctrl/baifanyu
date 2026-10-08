@@ -156,7 +156,8 @@ public class MainActivity extends Activity {
                 ? (running ? "状态：正在陪你。拖到屏幕左右边缘松手，她会扒在边上。" : "状态：已就绪，点下面的按钮让她出现。")
                 : "状态：还差一步 —— 需要「显示在其他应用上层」权限，否则她没法浮在别的应用上面。")
                 + "\n当前皮肤：" + skin.name + " · 表情 " + faces + " / " + skin.faces.length
-                + (faces < skin.faces.length ? "（素材缺失，重新装一次）" : ""));
+                + (faces < skin.faces.length ? "（素材缺失，重新装一次）" : "")
+                + "\n（打开这个界面时她会自动收起，免得挡住设置；回到桌面就回来）");
     }
 
     /** 数当前皮肤真正能加载到的表情数（路径来自 PetView.SKINS，不再写死） */
