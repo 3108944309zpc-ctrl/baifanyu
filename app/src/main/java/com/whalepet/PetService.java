@@ -108,6 +108,9 @@ public class PetService extends Service implements PetView.Listener {
     };
 
     private int screenW, screenH;
+    /** 趴边时累计"往外拉了多少"。位置会一直贴回边缘，但拉出量必须留着， */
+    /** 否则一松手就归零，她永远脱离不了边缘（上一版就栽在这）。 */
+    private int perchPull = 0;
 
     private final BroadcastReceiver screenRx = new BroadcastReceiver() {
         @Override public void onReceive(Context c, Intent i) {
@@ -124,8 +127,7 @@ public class PetService extends Service implements PetView.Listener {
         super.onCreate();
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         wm = (WindowManager) getSystemService(WINDOW_SERVICE);
-        screenW = getResources().getDisplayMetrics().widthPixels;
-        screenH = getResources().getDisplayMetrics().heightPixels;
+        measureScreen();
         createChannel();
 
         soundOn = prefs.getBoolean(KEY_SOUND, true);
@@ -304,6 +306,32 @@ public class PetService extends Service implements PetView.Listener {
         try { wm.updateViewLayout(view, lp); } catch (Exception ignored) { }
     }
 
+    /**
+     * 量真实的显示区域。
+     *
+     * 不能用 getResources().getDisplayMetrics().heightPixels —— 它不含导航栏，
+     * 于是她最多只能停在导航栏上方，怎么拖都到不了屏幕最底部（用户反馈过）。
+     */
+    private void measureScreen() {
+        try {
+            WindowManager w = (WindowManager) getSystemService(WINDOW_SERVICE);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                android.graphics.Rect b = w.getCurrentWindowMetrics().getBounds();
+                screenW = b.width();
+                screenH = b.height();
+            } else {
+                android.util.DisplayMetrics dm = new android.util.DisplayMetrics();
+                w.getDefaultDisplay().getRealMetrics(dm);
+                screenW = dm.widthPixels;
+                screenH = dm.heightPixels;
+            }
+        } catch (Exception e) {
+            android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+            screenW = dm.widthPixels;
+            screenH = dm.heightPixels;
+        }
+    }
+
     private void clamp() {
         int w = lp.width, h = lp.height;
         if (lp.x < 0) lp.x = 0;
@@ -431,6 +459,7 @@ public class PetService extends Service implements PetView.Listener {
 
     private void enterPerch(boolean right, boolean persist) {
         if (view == null) return;
+        perchPull = 0;
         view.setState(PetView.STATE_PERCH);
         view.setMirror(right);
         lp.width = Math.round(view.perchWindowW());
@@ -454,21 +483,31 @@ public class PetService extends Service implements PetView.Listener {
     // ---- PetView.Listener ----
 
     @Override
-    public void onDragStart() { hideMenu(); }
+    public void onDragStart() { hideMenu(); perchPull = 0; }
 
     @Override
     public void onDrag(float dx, float dy) {
         if (view == null) return;
-        lp.x += Math.round(dx);
         lp.y += Math.round(dy);
+
         if (view.getState() == PetView.STATE_PERCH) {
-            if (lp.x > screenW * 0.15f && lp.x < screenW * 0.85f) {
+            boolean right = prefs.getInt(KEY_EDGE, 0) == 1;
+            // "往外拉"的方向：贴右边时往左拉才算数，贴左边时往右拉才算数
+            perchPull += Math.round(right ? -dx : dx);
+            if (perchPull < 0) perchPull = 0;             // 往里推不算
+            if (perchPull > screenW * 0.12f) {            // 拉够远了 → 脱离边缘
+                perchPull = 0;
+                lp.x = right ? screenW - lp.width : 0;
                 exitPerch();
                 return;
             }
+            // 没拉够：位置贴回边缘，但 perchPull 留着（关键，别再抹掉）
+            lp.x = right ? screenW - lp.width : 0;
         } else {
-            clamp();
+            lp.x += Math.round(dx);
         }
+
+        clamp();
         try { wm.updateViewLayout(view, lp); } catch (Exception ignored) { }
     }
 
@@ -476,7 +515,15 @@ public class PetService extends Service implements PetView.Listener {
     public void onDragEnd(float rawX, float rawY) {
         if (view == null) return;
         prefs.edit().putInt(KEY_Y, lp.y).apply();
-        if (view.getState() == PetView.STATE_PERCH) return;
+        if (view.getState() == PetView.STATE_PERCH) {
+            // 兜底：松手时还停在趴边态，就确保她贴回边上（上下位置保留）
+            perchPull = 0;
+            lp.x = (prefs.getInt(KEY_EDGE, 0) == 1) ? screenW - lp.width : 0;
+            clamp();
+            try { wm.updateViewLayout(view, lp); } catch (Exception ignored) { }
+            return;
+        }
+        perchPull = 0;
 
         // 吸附判定不能用一个固定像素值：她调小之后窗口本身就窄，
         // 固定的 56dp 会占掉她宽度的一大半，导致"稍微靠近边缘"就被吸走。
