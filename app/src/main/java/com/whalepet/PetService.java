@@ -7,9 +7,11 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.ComponentCallbacks;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.content.res.Configuration;
 import android.graphics.PixelFormat;
 import android.graphics.drawable.GradientDrawable;
 import android.media.AudioAttributes;
@@ -141,6 +143,22 @@ public class PetService extends Service implements PetView.Listener {
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         wm = (WindowManager) getSystemService(WINDOW_SERVICE);
         measureScreen();
+
+        // 屏幕旋转之后 screenW/screenH 会变，但 Service 不会自动收到通知 ——
+        // 不重新量的话，横屏时"扒右边"会算到屏幕中间去。
+        registerComponentCallbacks(new ComponentCallbacks() {
+            @Override public void onConfigurationChanged(Configuration cfg) {
+                measureScreen();
+                if (view == null || lp == null) return;
+                if (view.getState() == PetView.STATE_PERCH) {
+                    // 她正扒在边上：按新的屏幕尺寸重新贴边
+                    enterPerch(prefs.getInt(KEY_EDGE, 0) == 1, false);
+                } else {
+                    applyLayout();   // 悬空态：clamp 会把她收进新屏幕里
+                }
+            }
+            @Override public void onLowMemory() { }
+        });
         createChannel();
 
         soundOn = prefs.getBoolean(KEY_SOUND, true);
@@ -530,6 +548,7 @@ public class PetService extends Service implements PetView.Listener {
 
     private void enterPerch(boolean right, boolean persist) {
         if (view == null) return;
+        measureScreen();   // 兜底：万一旋转监听没触发，这里也要用最新的屏幕尺寸
         perchPull = 0;
         view.setState(PetView.STATE_PERCH);
         view.setMirror(right);
