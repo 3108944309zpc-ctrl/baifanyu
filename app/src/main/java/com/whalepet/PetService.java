@@ -61,7 +61,14 @@ public class PetService extends Service implements PetView.Listener {
     private final int[] duckIds = new int[DUCK_COUNT];
     private int duckSel = 0;
     private boolean soundOn = true;
-    private final int[] duckLoadStatus = new int[] { -999, -999, -999 };
+    // 长度必须跟着 DUCK_COUNT 走。写死 3 个的话，音效加到 8 个就会越界崩溃。
+    private final int[] duckLoadStatus = newDuckStatus();
+
+    private static int[] newDuckStatus() {
+        int[] a = new int[DUCK_COUNT];
+        java.util.Arrays.fill(a, -999);
+        return a;
+    }
     private final Random rnd = new Random();
     /** 静音提示的节流时间戳，避免连点时刷屏 */
     private long lastSilentHintMs = 0L;
