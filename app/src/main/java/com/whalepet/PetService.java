@@ -20,6 +20,7 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.LinearLayout;
@@ -47,6 +48,7 @@ public class PetService extends Service implements PetView.Listener {
     public static final String ACTION_SOUND_DIAG = "com.whalepet.SOUND_DIAG";
     public static final String ACTION_SET_HIDDEN = "com.whalepet.SET_HIDDEN";
     public static final String ACTION_NEXT_SKIN = "com.whalepet.NEXT_SKIN";
+    public static final String ACTION_PREVIEW_DUCK = "com.whalepet.PREVIEW_DUCK";
     public static final String EXTRA_COUNT = "count";
     public static final String EXTRA_HIDDEN = "hidden";
 
@@ -56,7 +58,8 @@ public class PetService extends Service implements PetView.Listener {
 
     // 小黄鸭音效。用 SoundPool 而不是 MediaPlayer —— 短音效的延迟低得多，连点也不会卡。
     private SoundPool soundPool;
-    private final int[] duckIds = new int[3];
+    private final int[] duckIds = new int[DUCK_COUNT];
+    private int duckSel = 0;
     private boolean soundOn = true;
     private final int[] duckLoadStatus = new int[] { -999, -999, -999 };
     private final Random rnd = new Random();
@@ -81,6 +84,8 @@ public class PetService extends Service implements PetView.Listener {
     public static final String KEY_SOUND = "sound_on";
     public static final String KEY_SKIN = "skin_index";
     public static final String KEY_X = "pos_x";
+    public static final String KEY_DUCK = "duck_index";
+    public static final int DUCK_COUNT = 8;
     public static final String KEY_WANDER = "wander_on";
     public static final String KEY_RUNNING = "running";
     public static final String KEY_EDGE = "edge";
@@ -174,6 +179,14 @@ public class PetService extends Service implements PetView.Listener {
             } else {
                 // 设置页打开时她不在，先记住，回来再补
                 pendingFace = (pendingFace + 1) % 7;
+            }
+            return START_STICKY;
+        }
+        if (ACTION_PREVIEW_DUCK.equals(action)) {
+            duckSel = prefs.getInt(KEY_DUCK, 0);
+            if (soundPool != null) {
+                int i = Math.max(0, Math.min(duckIds.length - 1, duckSel));
+                if (duckIds[i] != 0) soundPool.play(duckIds[i], 1f, 1f, 1, 0, 1f);
             }
             return START_STICKY;
         }
@@ -296,6 +309,7 @@ public class PetService extends Service implements PetView.Listener {
         boolean prevWander = wanderOn;
         soundOn = prefs.getBoolean(KEY_SOUND, true);
         wanderOn = prefs.getBoolean(KEY_WANDER, true);
+        duckSel = prefs.getInt(KEY_DUCK, 0);
         // 开关动过就重挂一次定时器 —— 不重挂的话，那个 tick 一旦退出就再也回不来，
         // 表现为"关了还爬"或者"开了不爬"。
         if (wanderOn != prevWander) restartWander();
@@ -414,11 +428,23 @@ public class PetService extends Service implements PetView.Listener {
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                         | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
                         | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                        // 点菜单外面的地方也把菜单收掉（原来只能等 6 秒自动消失）
+                        | WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
                 PixelFormat.TRANSLUCENT);
         menuLp.gravity = Gravity.TOP | Gravity.START;
         menuLp.x = 0;
         menuLp.y = 0;
+        // 收到 ACTION_OUTSIDE = 用户点了菜单外面 → 收起
+        row.setOnTouchListener(new View.OnTouchListener() {
+            @Override public boolean onTouch(View v, MotionEvent ev) {
+                if (ev.getActionMasked() == MotionEvent.ACTION_OUTSIDE) {
+                    hideMenu();
+                    return true;
+                }
+                return false;
+            }
+        });
         menuView = row;
 
         try {
@@ -598,6 +624,11 @@ public class PetService extends Service implements PetView.Listener {
         duckIds[0] = soundPool.load(this, R.raw.duck1, 1);
         duckIds[1] = soundPool.load(this, R.raw.duck2, 1);
         duckIds[2] = soundPool.load(this, R.raw.duck3, 1);
+        duckIds[3] = soundPool.load(this, R.raw.duck4, 1);
+        duckIds[4] = soundPool.load(this, R.raw.duck5, 1);
+        duckIds[5] = soundPool.load(this, R.raw.duck6, 1);
+        duckIds[6] = soundPool.load(this, R.raw.duck7, 1);
+        duckIds[7] = soundPool.load(this, R.raw.duck8, 1);
         android.util.Log.d("WhalePetAudio", "load ids="
                 + duckIds[0] + "," + duckIds[1] + "," + duckIds[2]);
     }
@@ -608,7 +639,9 @@ public class PetService extends Service implements PetView.Listener {
      */
     private int playDuckSound() {
         if (soundPool == null) return 0;
-        int id = duckIds[rnd.nextInt(duckIds.length)];
+        // 放用户选中的那一个（原来是从 8 个里随机挑 —— 用户没得选）
+        int sel = Math.max(0, Math.min(duckIds.length - 1, duckSel));
+        int id = duckIds[sel];
         if (id == 0) {
             loadDuckSounds();
             return 0;

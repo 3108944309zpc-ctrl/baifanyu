@@ -22,7 +22,7 @@ public class MainActivity extends Activity {
     private SharedPreferences prefs;
     private TextView tvStatus, tvHover, tvPerch, tvAmp;
     private SeekBar sbHover, sbPerch, sbAmp;
-    private Button btnPerm, btnToggle, btnFace, btnSkin, btnSoundDiag;
+    private Button btnPerm, btnToggle, btnFace, btnSkin, btnSoundDiag, btnDuck;
     private Switch swSound, swWander;
 
     @Override
@@ -42,6 +42,15 @@ public class MainActivity extends Activity {
         btnToggle = findViewById(R.id.btnToggle);
         btnFace = findViewById(R.id.btnFace);
         btnFace.setOnClickListener(v -> sendAction(PetService.ACTION_NEXT_FACE));
+
+        btnDuck = findViewById(R.id.btnDuck);
+        btnDuck.setOnClickListener(v -> {
+            int k = (prefs.getInt(PetService.KEY_DUCK, 0) + 1) % PetService.DUCK_COUNT;
+            prefs.edit().putInt(PetService.KEY_DUCK, k).apply();
+            btnDuck.setText(duckLabel(k));
+            refreshService();
+            sendAction(PetService.ACTION_PREVIEW_DUCK);   // 点一下立刻试听
+        });
 
         btnSoundDiag = findViewById(R.id.btnSoundDiag);
         btnSoundDiag.setOnClickListener(v -> sendAction(PetService.ACTION_SOUND_DIAG));
@@ -114,6 +123,10 @@ public class MainActivity extends Activity {
         super.onPause();
     }
 
+    private String duckLabel(int idx) {
+        return "音效 " + (idx + 1) + " / " + PetService.DUCK_COUNT + "　▸ 点击试听";
+    }
+
     private String skinLabel(int idx) {
         return "皮肤：" + PetView.SKINS[idx % PetView.SKINS.length].name + "　▸ 点击切换";
     }
@@ -137,6 +150,7 @@ public class MainActivity extends Activity {
         tvPerch.setText("趴边时脑袋宽度：" + Math.round(pw) + " dp");
         tvAmp.setText("动态幅度：" + ampPct + "%");
 
+        btnDuck.setText(duckLabel(prefs.getInt(PetService.KEY_DUCK, 0)));
         boolean snd = prefs.getBoolean(PetService.KEY_SOUND, true);
         if (swSound.isChecked() != snd) swSound.setChecked(snd);   // 先判断再设，避免回调绕圈
         boolean wdr = prefs.getBoolean(PetService.KEY_WANDER, true);

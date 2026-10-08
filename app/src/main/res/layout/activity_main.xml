@@ -283,6 +283,16 @@
                 android:layout_height="wrap_content" />
 
             <Button
+                android:id="@+id/btnDuck"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/btn_ghost"
+                android:text="音效 1 / 8　▸ 点击试听"
+                android:textColor="@color/ink"
+                android:textSize="14sp" />
+
+            <Button
                 android:id="@+id/btnSoundDiag"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
