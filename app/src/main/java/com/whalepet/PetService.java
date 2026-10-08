@@ -127,6 +127,14 @@ public class PetService extends Service implements PetView.Listener {
     /** 否则一松手就归零，她永远脱离不了边缘（上一版就栽在这）。 */
     private int perchPull = 0;
 
+    /**
+     * 趴屏幕下边时露出多少。
+     * 1.0 = 整个脑袋都露出来，站在屏幕下沿上（不切）。
+     * 调小会让更多部分藏到屏幕外 —— 但要注意趴下边用的裁剪区比脸长，
+     * 调小了会先切到脸。
+     */
+    private static final float BOTTOM_VISIBLE = 1.0f;
+
     private final BroadcastReceiver screenRx = new BroadcastReceiver() {
         @Override public void onReceive(Context c, Intent i) {
             if (view == null) return;
@@ -152,7 +160,9 @@ public class PetService extends Service implements PetView.Listener {
                 if (view == null || lp == null) return;
                 if (view.getState() == PetView.STATE_PERCH) {
                     // 她正扒在边上：按新的屏幕尺寸重新贴边
-                    enterPerch(prefs.getInt(KEY_EDGE, 0) == 1, false);
+                    int e1 = prefs.getInt(KEY_EDGE, 0);
+                    if (e1 == PetView.EDGE_BOTTOM) enterPerchBottom(false);
+                    else enterPerch(e1 == 1, false);
                 } else {
                     applyLayout();   // 悬空态：clamp 会把她收进新屏幕里
                 }
@@ -320,7 +330,9 @@ public class PetService extends Service implements PetView.Listener {
             pendingFace = 0;
         }
         if (prefs.getBoolean(KEY_PERCHED, false)) {
-            enterPerch(prefs.getInt(KEY_EDGE, 0) == 1, false);   // 她本来是扒在边上的
+            int e0 = prefs.getInt(KEY_EDGE, 0);
+            if (e0 == PetView.EDGE_BOTTOM) enterPerchBottom(false);
+            else enterPerch(e0 == 1, false);
         } else {
             lp.x = prefs.getInt(KEY_X, lp.x);
             applyLayout();
@@ -413,6 +425,14 @@ public class PetService extends Service implements PetView.Listener {
         int w = lp.width, h = lp.height;
         if (lp.x < 0) lp.x = 0;
         if (lp.x > screenW - w) lp.x = Math.max(0, screenW - w);
+        // 趴屏幕下边时她本来就该有一部分在屏幕外，不能按普通规则夹 y
+        if (view != null && view.getState() == PetView.STATE_PERCH
+                && view.getPerchEdge() == PetView.EDGE_BOTTOM) {
+            // 用脑袋真实高度定位，不是窗口高度 —— 窗口比脑袋高，
+            // 拿窗口高度定位会让她离下沿差出一截。
+            lp.y = Math.round(screenH - view.perchVisibleH() * BOTTOM_VISIBLE);
+            return;
+        }
         int topLimit = -Math.round(h * 0.12f);
         int bottomLimit = screenH - Math.round(h * 0.88f);
         if (lp.y < topLimit) lp.y = topLimit;
@@ -546,11 +566,29 @@ public class PetService extends Service implements PetView.Listener {
 
     // ---- 状态切换 ----
 
+    /** 趴到屏幕下边：脑袋从下沿探出来，水平位置不动 */
+    private void enterPerchBottom(boolean persist) {
+        if (view == null) return;
+        measureScreen();
+        perchPull = 0;
+        view.setState(PetView.STATE_PERCH);
+        view.setPerchEdge(PetView.EDGE_BOTTOM);
+        view.setMirror(false);
+        lp.width = Math.round(view.perchWindowW());
+        lp.height = Math.round(view.perchWindowH());
+        clamp();   // clamp 里会把 y 钉在屏幕下沿
+        try { wm.updateViewLayout(view, lp); } catch (Exception ignored) { }
+        if (persist) {
+            prefs.edit().putBoolean(KEY_PERCHED, true).putInt(KEY_EDGE, PetView.EDGE_BOTTOM).apply();
+        }
+    }
+
     private void enterPerch(boolean right, boolean persist) {
         if (view == null) return;
         measureScreen();   // 兜底：万一旋转监听没触发，这里也要用最新的屏幕尺寸
         perchPull = 0;
         view.setState(PetView.STATE_PERCH);
+        view.setPerchEdge(right ? PetView.EDGE_RIGHT : PetView.EDGE_LEFT);
         view.setMirror(right);
         lp.width = Math.round(view.perchWindowW());
         lp.height = Math.round(view.perchWindowH());
@@ -579,6 +617,21 @@ public class PetService extends Service implements PetView.Listener {
     public void onDrag(float dx, float dy) {
         if (view == null) return;
         lp.y += Math.round(dy);
+
+        if (view.getState() == PetView.STATE_PERCH
+                && view.getPerchEdge() == PetView.EDGE_BOTTOM) {
+            // 趴在下边：往上拉才把她拉起来（左右拉不算）
+            perchPull += Math.round(-dy);
+            if (perchPull < 0) perchPull = 0;
+            if (perchPull > screenH * 0.08f) {
+                perchPull = 0;
+                exitPerch();
+                return;
+            }
+            clamp();   // 还趴着：钉回屏幕下沿
+            try { wm.updateViewLayout(view, lp); } catch (Exception ignored) { }
+            return;
+        }
 
         if (view.getState() == PetView.STATE_PERCH) {
             boolean right = prefs.getInt(KEY_EDGE, 0) == 1;
@@ -622,6 +675,8 @@ public class PetService extends Service implements PetView.Listener {
         float snap = Math.min(snapDp, lp.width * 0.25f);
         if (lp.x <= snap) enterPerch(false, true);
         else if (lp.x + lp.width >= screenW - snap) enterPerch(true, true);
+        // 拖到屏幕下沿附近 → 趴到下边去（放在左右之后，角落处优先左右）
+        else if (lp.y + lp.height >= screenH - Math.min(snapDp, lp.height * 0.30f)) enterPerchBottom(true);
         else applyLayout();
     }
 
