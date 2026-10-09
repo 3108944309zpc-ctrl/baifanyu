@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -85,39 +85,48 @@
             android:textColor="#FFFFFF"
             android:textSize="15sp" />
 
-        <Button
-            android:id="@+id/btnFace"
-            android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:layout_marginTop="10dp"
-            android:background="@drawable/btn_ghost"
-            android:text="试一下换表情"
-            android:textColor="@color/navy"
-            android:textSize="14sp" />
-
-        <!-- 尺寸 -->
+        <!--
+            大肥鱼 / 小龙女 两张卡结构完全一样，顺序也一一对应：
+            显示开关 · 悬空大小 · 趴边脑袋宽度 · 动作幅度 · 外观 · 自己溜达
+            改一张卡的时候记得另一张照做，不然两边又会不一致。
+        -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="14dp"
+            android:layout_marginTop="12dp"
             android:background="@drawable/bg_card"
             android:orientation="vertical"
             android:padding="16dp">
 
-            <TextView
-                android:layout_width="wrap_content"
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="调节"
-                android:textColor="@color/ink"
-                android:textSize="16sp"
-                android:textStyle="bold" />
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="大肥鱼"
+                    android:textColor="@color/ink"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <Switch
+                    android:id="@+id/swFish"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="显示"
+                    android:textColor="@color/ink"
+                    android:textSize="13sp" />
+            </LinearLayout>
 
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:lineSpacingExtra="2dp"
-                android:text="大小分两处：悬空时看整体高度，扒在边上时只有脑袋露出来、看的是脑袋宽度。"
+                android:layout_marginTop="3dp"
+                android:text="拖动改位置，拖到屏幕边缘会扒在边上、只露一个脑袋；闲着会自己溜达，跟小龙女重叠时会触发互动。"
                 android:textColor="@color/ink3"
                 android:textSize="11sp" />
 
@@ -125,7 +134,7 @@
                 android:id="@+id/tvHover"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="14dp"
+                android:layout_marginTop="12dp"
                 android:textColor="@color/ink"
                 android:textSize="14sp" />
 
@@ -163,12 +172,244 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="动得晃眼就往左拉，太安静就往右拉。"
+                android:text="上面是悬空时的大小，中间是扒在边上露出的脑袋宽度，下面是晃动的幅度（晃眼往左、太静往右）。"
                 android:textColor="@color/ink3"
                 android:textSize="11sp" />
+
+            <Button
+                android:id="@+id/btnSkin"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/btn_ghost"
+                android:text="大肥鱼皮肤：女仆装　▸ 点击切换"
+                android:textColor="@color/ink"
+                android:textSize="14sp" />
+
+            <Button
+                android:id="@+id/btnFace"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:background="@drawable/btn_ghost"
+                android:text="大肥鱼表情　▸ 点击切换"
+                android:textColor="@color/ink"
+                android:textSize="14sp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="大肥鱼自己溜达"
+                        android:textColor="@color/ink"
+                        android:textSize="14sp" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="闲着的时候她自己爬来爬去（碰她、拖她、趴边、互动时不动）"
+                        android:textColor="@color/ink3"
+                        android:textSize="11sp" />
+                </LinearLayout>
+
+                <Switch
+                    android:id="@+id/swWander"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
         </LinearLayout>
 
-        <!-- 皮肤 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/bg_card"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="小龙女"
+                    android:textColor="@color/ink"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <Switch
+                    android:id="@+id/swDragon"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="显示"
+                    android:textColor="@color/ink"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:text="拖动改位置，拖到屏幕边缘会像大肥鱼一样扒在边上、只露一个脑袋；闲着会自己溜达，跟大肥鱼重叠时会触发互动。"
+                android:textColor="@color/ink3"
+                android:textSize="11sp" />
+
+            <TextView
+                android:id="@+id/tvDragonHeight"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:textColor="@color/ink"
+                android:textSize="14sp" />
+
+            <SeekBar
+                android:id="@+id/sbDragonHeight"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+
+            <TextView
+                android:id="@+id/tvDragonPerch"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:textColor="@color/ink"
+                android:textSize="14sp" />
+
+            <SeekBar
+                android:id="@+id/sbDragonPerch"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+
+            <TextView
+                android:id="@+id/tvDragonAmp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:textColor="@color/ink"
+                android:textSize="14sp" />
+
+            <SeekBar
+                android:id="@+id/sbDragonAmp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="上面是悬空时的大小，中间是扒在边上露出的脑袋宽度，下面是晃动的幅度（晃眼往左、太静往右）。"
+                android:textColor="@color/ink3"
+                android:textSize="11sp" />
+
+            <Button
+                android:id="@+id/btnDragonFace"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/btn_ghost"
+                android:text="小龙女表情：待机　▸ 点击切换"
+                android:textColor="@color/ink"
+                android:textSize="14sp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="小龙女自己溜达"
+                        android:textColor="@color/ink"
+                        android:textSize="14sp" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="闲着的时候她自己爬来爬去（碰她、拖她、趴边、互动时不动）"
+                        android:textColor="@color/ink3"
+                        android:textSize="11sp" />
+                </LinearLayout>
+
+                <Switch
+                    android:id="@+id/swDragonWander"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- 打闹开关：有些用户不想看她们互相追打，只想看贴贴和魔法 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:background="@drawable/bg_card"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="打闹"
+                        android:textColor="@color/ink"
+                        android:textSize="16sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="3dp"
+                        android:text="关掉之后两人不会互相追打，只保留打招呼、贴贴、魔法等其他互动"
+                        android:textColor="@color/ink3"
+                        android:textSize="11sp" />
+                </LinearLayout>
+
+                <Switch
+                    android:id="@+id/swPlayfight"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- 互动范围：打闹/走位/睡觉的活动区域 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -180,68 +421,70 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="皮肤"
+                android:text="互动范围"
                 android:textColor="@color/ink"
                 android:textSize="16sp"
                 android:textStyle="bold" />
 
             <TextView
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="3dp"
-                android:text="两套形象，点下面按钮切换"
+                android:text="两人打闹、走位、凑到一起都发生在这块区域里。存的是相对整屏的比例，所以换方向、上平板都自动跟着变。"
                 android:textColor="@color/ink3"
                 android:textSize="11sp" />
 
-            <Button
-                android:id="@+id/btnSkin"
+            <Spinner
+                android:id="@+id/spRegion"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:background="@drawable/btn_ghost"
-                android:text="皮肤：女仆装　▸ 点击切换"
-                android:textColor="@color/ink"
-                android:textSize="15sp" />
+                android:layout_marginTop="10dp" />
         </LinearLayout>
 
-
-        <!-- 自动溜达 -->
+        <!-- 睡觉待机：单独一张卡，时间可调 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="14dp"
             android:background="@drawable/bg_card"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
+            android:orientation="vertical"
             android:padding="16dp">
 
-            <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:orientation="vertical">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="自动溜达"
-                    android:textColor="@color/ink"
-                    android:textSize="16sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="3dp"
-                    android:text="闲着的时候她自己爬来爬去（碰她、拖她、趴边时不动）"
-                    android:textColor="@color/ink3"
-                    android:textSize="11sp" />
-            </LinearLayout>
-
-            <Switch
-                android:id="@+id/swWander"
+            <TextView
                 android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="睡觉待机"
+                android:textColor="@color/ink"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:text="扒在屏幕边上不动够久，就当她们睡着了，之后偶尔冒一句晚安之类的短台词（不会把她们从边上挪走）。"
+                android:textColor="@color/ink3"
+                android:textSize="11sp" />
+
+            <TextView
+                android:id="@+id/tvSleep"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:textColor="@color/ink"
+                android:textSize="14sp" />
+
+            <SeekBar
+                android:id="@+id/sbSleep"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="0 = 关闭睡觉待机。拉到 1~10 就是「趴边多少分钟触发」，触发后 3 分钟内不再重复。"
+                android:textColor="@color/ink3"
+                android:textSize="11sp" />
         </LinearLayout>
 
         <!-- 音效 -->
@@ -250,37 +493,55 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="14dp"
             android:background="@drawable/bg_card"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
+            android:orientation="vertical"
             android:padding="16dp">
 
+            <!-- 标题 + 开关一行；按钮必须放在这一行外面， -->
+            <!-- 横排里的 match_parent 子控件会被压成 0 宽，按钮就看不见了 -->
             <LinearLayout
-                android:layout_width="0dp"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:orientation="vertical">
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
 
-                <TextView
-                    android:layout_width="wrap_content"
+                <LinearLayout
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:text="小黄鸭音效"
-                    android:textColor="@color/ink"
-                    android:textSize="16sp"
-                    android:textStyle="bold" />
+                    android:layout_weight="1"
+                    android:orientation="vertical">
 
-                <TextView
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="小黄鸭音效"
+                        android:textColor="@color/ink"
+                        android:textSize="16sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="3dp"
+                        android:text="点她一下，吱一声"
+                        android:textColor="@color/ink3"
+                        android:textSize="11sp" />
+                </LinearLayout>
+
+                <Switch
+                    android:id="@+id/swSound"
                     android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="3dp"
-                    android:text="点她一下，吱一声"
-                    android:textColor="@color/ink3"
-                    android:textSize="11sp" />
+                    android:layout_height="wrap_content" />
             </LinearLayout>
 
-            <Switch
-                android:id="@+id/swSound"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content" />
+            <Button
+                android:id="@+id/btnDuck"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/btn_ghost"
+                android:text="音效 1 / 8　▸ 点击试听"
+                android:textColor="@color/ink"
+                android:textSize="14sp" />
 
             <Button
                 android:id="@+id/btnSoundDiag"
@@ -316,7 +577,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
                 android:lineSpacingExtra="6dp"
-                android:text="· 按住她，拖到任意位置\n· 拖到屏幕左右边缘松手 —— 她会扒在边上，只露一个脑袋看着你\n· 从边缘往外拖，回到悬空状态\n· 点她一下，换一个表情\n· 长按她，弹出「设置 / 关闭」"
+                android:text="· 点一下大肥鱼或小龙女：换个表情，冒一句跟当前心情对得上的台词\n· 按住拖动；拖到屏幕左右边缘松手会扒在边上，从边上往外拖就下来\n· 两人「真的叠在一起」时才会随机开演：打招呼 / 拌嘴 / 吃醋 / 贴贴 / 打闹 / 锅盖 / 魔法 / 告别，会走过来、蹦、靠、抖，不是只换气泡\n· 不想看她们追打：把上面「打闹」关掉，其余互动照常\n· 一段演完或被打断后会冷静一会儿，再叠到一起才演下一段\n· 演出中拖动任意一位：立刻停演，并把两人朝相反方向拉开\n· 「互动范围」决定她们走动、互动发生在屏幕的哪一块，横屏 / 平板 / 分屏都跟着当前方向变\n· 长按角色打开各自的小菜单：互动、表情、关闭\n· 扒在边上够久会睡着，偶尔冒一句晚安；多久算「够久」、要不要让她们自己溜达，都在下面的开关里调"
                 android:textColor="@color/ink2"
                 android:textSize="13sp" />
         </LinearLayout>

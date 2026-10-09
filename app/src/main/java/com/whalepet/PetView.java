@@ -7,7 +7,9 @@ import android.graphics.Canvas;
 import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Rect;
+import android.graphics.Path;
 import android.graphics.RectF;
+import android.graphics.Typeface;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.AttributeSet;
@@ -96,6 +98,8 @@ public class PetView extends View implements Choreographer.FrameCallback {
     private static final float NS = 1_000_000_000f;
     private static final long LONG_PRESS_MS = 800;
 
+    // 气泡画法统一在 SpeechBubble 里，两个角色共用一套，才不会两边不一样
+
     public interface Listener {
         void onDragStart();
         void onDrag(float dx, float dy);
@@ -114,13 +118,23 @@ public class PetView extends View implements Choreographer.FrameCallback {
     private boolean[] faceOk = new boolean[0];
 
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+    private final Paint cloudPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Handler handler = new Handler(Looper.getMainLooper());
+    /** 气泡和情绪动效两个角色共用同一套画法（SpeechBubble / Effects）。 */
+    private SpeechBubble bubble;
+    private Effects fx;
+    private final int[] screenLoc = new int[2];
 
     private int srcW = 944, srcH = 1200;
     private int headX0, headX1, headY0, headY1;
 
     private int state = STATE_HOVER;
     private boolean mirrorX = false;
+    // 小剧场姿态通道：倾斜（绕立绘中心转）、压扁回弹、临时抬升、整体缩放。
+    // 只做整体变换，不改立绘本身 —— 用来演"靠、探、蹦、被推、被撞、贴住"。
+    private float poseLean, poseLift, poseSquash = 1f, poseScale = 1f;
+    /** 演小剧场时才把窗口横向留宽一点，给倾斜的头顶留地方；平时是 1。 */
+    private float poseSlack = 1f;
     private float hoverHeightDp = 240f, perchWidthDp = 96f, ampScale = 0.75f;
 
     private float pDy, pSx = 1f, pSy = 1f;
@@ -129,6 +143,8 @@ public class PetView extends View implements Choreographer.FrameCallback {
     private long startNs, lastFrameNs, tapNs;
     private long frameIntervalNs = (long) (NS / 30);
     private boolean windowVisible = true, looping = false;
+    private int interactionPhase;
+    private boolean sleeping;
 
     private Listener listener;
     private float downRawX, downRawY, lastRawX, lastRawY;
@@ -150,6 +166,11 @@ public class PetView extends View implements Choreographer.FrameCallback {
         touchSlop = ViewConfiguration.get(c).getScaledTouchSlop();
         paint.setFilterBitmap(true);
         paint.setDither(true);
+        float density = c.getResources().getDisplayMetrics().density;
+        bubble = new SpeechBubble(density);
+        fx = new Effects(density);
+        cloudPaint.setAntiAlias(true);
+        cloudPaint.setFilterBitmap(true);
         applySkin(0);
     }
 
@@ -257,6 +278,40 @@ public class PetView extends View implements Choreographer.FrameCallback {
 
     public int currentFace() { return faceCur; }
 
+    public void showBubble(String text) {
+        if (bubble == null) return;
+        bubble.show(text, bubbleSide(), Math.max(dp(40f), getWidth() - dp(6f)), System.nanoTime());
+        invalidate();
+    }
+
+    public void clearBubble() {
+        if (bubble != null) bubble.clear();
+        invalidate();
+    }
+
+    public boolean hasBubble() {
+        return bubble != null && bubble.isActive(System.nanoTime());
+    }
+
+    /** 情绪符号：爱心 / 星星 / 魔法星芒 / 气鼓鼓 / 眼泪 / 梦境（和另一个角色共用 Effects）。 */
+    public void setMood(int mood) {
+        if (fx != null) {
+            fx.setMood(mood, System.nanoTime());
+            invalidate();
+        }
+    }
+
+    /**
+     * 气泡的小尾巴朝哪边：人在屏幕左半边就朝右、右半边就朝左 ——
+     * 两个人靠近时两根尾巴正好朝中间，跟参考图里一样。
+     */
+    private int bubbleSide() {
+        getLocationOnScreen(screenLoc);
+        int screenW = getResources().getDisplayMetrics().widthPixels;
+        float center = screenLoc[0] + getWidth() / 2f;
+        return center * 2f < screenW ? SpeechBubble.TAIL_RIGHT : SpeechBubble.TAIL_LEFT;
+    }
+
     public void pokeFeedback() { tapNs = System.nanoTime(); invalidate(); }
 
     public void setListener(Listener l) { this.listener = l; }
@@ -267,6 +322,12 @@ public class PetView extends View implements Choreographer.FrameCallback {
 
     public void setWalking(boolean w) {
         if (walking != w) { walking = w; invalidate(); }
+    }
+
+    public void setInteractionPhase(int value) { interactionPhase = value; invalidate(); }
+
+    public void setSleeping(boolean value) {
+        if (sleeping != value) { sleeping = value; invalidate(); }
     }
 
     /** 距离上一次碰她过了多久（毫秒）—— 刚碰过就先别乱跑 */
@@ -286,6 +347,24 @@ public class PetView extends View implements Choreographer.FrameCallback {
     public int getState() { return state; }
     public void setMirror(boolean m) { mirrorX = m; invalidate(); }
 
+    /** 小剧场姿态：leanDeg 倾斜角度，squash 压扁（1=不变），liftUnit 抬升（以身高为单位），scale 整体缩放。 */
+    public void setPose(float leanDeg, float squash, float liftUnit, float scale) {
+        poseLean = leanDeg;
+        poseSquash = squash <= 0.3f ? 1f : squash;
+        poseLift = liftUnit;
+        poseScale = scale <= 0.3f ? 1f : scale;
+        invalidate();
+    }
+
+    /** 演出、收工时开关窗口横向余量（只在互动期间打开，平时不留空白触摸区）。 */
+    public void setPoseSlack(boolean on) {
+        float v = on ? 1.22f : 1f;
+        if (v == poseSlack) return;
+        poseSlack = v;
+        requestLayout();
+        invalidate();
+    }
+
     public void setHoverHeightDp(float v) { hoverHeightDp = v; requestLayout(); invalidate(); }
     public void setPerchWidthDp(float v) { perchWidthDp = v; requestLayout(); invalidate(); }
     public float getHoverHeightDp() { return hoverHeightDp; }
@@ -294,7 +373,7 @@ public class PetView extends View implements Choreographer.FrameCallback {
 
     private float dp(float v) { return v * getResources().getDisplayMetrics().density; }
 
-    public float windowW() { return dp(hoverHeightDp) * srcW / (float) srcH; }
+    public float windowW() { return dp(hoverHeightDp) * srcW / (float) srcH * poseSlack; }
     public float windowH() { return dp(hoverHeightDp) * 1.16f; }
     public float perchWindowW() { return dp(perchWidthDp) * 1.10f; }
     public float perchWindowH() {
@@ -334,6 +413,30 @@ public class PetView extends View implements Choreographer.FrameCallback {
         } else if (!dragging) {
             dragTilt = 0f;
         }
+        if (interactionPhase == 2 || interactionPhase == 3) {
+            float j = tau * t * 3.2f;
+            pDy += 0.026f * ampScale * (float) Math.sin(j);
+            dragTilt += 4.5f * (float) Math.sin(j);
+        } else if (interactionPhase == 4) {
+            pSy *= 1f + 0.025f * ampScale * (float) Math.sin(tau * t * 4f);
+            dragTilt += 1.5f * (float) Math.sin(tau * t * 2f);
+        } else if (interactionPhase == 5 || interactionPhase == 6) {
+            pDy += 0.010f * ampScale * (float) Math.sin(tau * t / 1.8f);
+            pSy *= 1f + 0.020f * ampScale * (float) Math.sin(tau * t / 2.1f);
+        } else if (interactionPhase == 7) {
+            // 依偎：和小龙女同一个频率，看起来像靠在一起
+            pDy += 0.014f * ampScale * (float) Math.sin(tau * t / 2.4f);
+            pSy *= 1f + 0.012f * ampScale * (float) Math.sin(tau * t / 2.4f);
+            dragTilt += 1.8f * (float) Math.sin(tau * t / 2.4f);
+        } else if (interactionPhase == 8) {
+            dragTilt += 6.5f * (float) Math.sin(tau * t * 5f) * (1f - Math.min(1f, t % 1f));
+        } else if (interactionPhase == 9) {
+            pDy -= 0.030f * ampScale * Math.abs((float) Math.sin(tau * t / 1.6f));
+        }
+        if (sleeping) {
+            pDy += 0.012f * ampScale * (float) Math.sin(tau * t / 3.4f);
+            pSy *= 1f + 0.026f * ampScale * (float) Math.sin(tau * t / 3.4f);
+        }
         if (tapNs != 0) {
             float k = (now - tapNs) / (0.30f * NS);
             if (k >= 1f) tapNs = 0;
@@ -342,6 +445,43 @@ public class PetView extends View implements Choreographer.FrameCallback {
 
         if (state == STATE_HOVER) drawHover(canvas);
         else drawPerch(canvas, t);
+        if (sleeping && state == STATE_HOVER) {
+            // 躺进云里：身子已经往下沉了，这里补一朵云把下半身盖住（参考图里的睡姿）
+            float h = dp(hoverHeightDp);
+            Effects.drawCloud(canvas, cloudPaint, 0f, getWidth(), getHeight() - h * 0.30f, h * 0.32f);
+        }
+        if (fx != null) {
+            if (state == STATE_HOVER) {
+                float h = dp(hoverHeightDp);
+                fx.draw(canvas, getWidth() / 2f, getHeight() - h * 0.92f, h, now);
+            } else {
+                fx.draw(canvas, getWidth() * 0.55f, getHeight() * 0.22f, getHeight(), now);
+            }
+        }
+        drawBubble(canvas, now);
+        if (sleeping) drawZzz(canvas, t);
+    }
+
+    /** 睡觉动效：三个"Z"依次飘起、变大、淡出（画法在 Effects 里，两个角色共用）。 */
+    private void drawZzz(Canvas canvas, float t) {
+        if (fx == null) return;
+        float h = dp(hoverHeightDp);
+        float baseX, baseY, unit;
+        if (state == STATE_HOVER) {
+            baseX = getWidth() / 2f + h * srcW / (float) srcH * 0.30f;
+            baseY = Math.max(dp(18f), getHeight() - h * 0.96f);
+            unit = h;
+        } else {
+            baseX = getWidth() * 0.55f;
+            baseY = getHeight() * 0.22f;
+            unit = getHeight();
+        }
+        fx.drawZzz(canvas, baseX, baseY, unit, System.nanoTime());
+    }
+
+    private void drawBubble(Canvas canvas, long now) {
+        if (bubble == null) return;
+        bubble.draw(canvas, getWidth() / 2f, dp(4f), Math.max(dp(40f), getWidth() - dp(6f)), now);
     }
 
     private void drawHover(Canvas canvas) {
@@ -349,13 +489,17 @@ public class PetView extends View implements Choreographer.FrameCallback {
         float w = h * srcW / (float) srcH;
         float ww = getWidth(), hh = getHeight();
         float cx = ww / 2f;
-        float bottom = hh - h * 0.08f + pDy * h;
-        float top = bottom - h * pSy;
-        float halfW = w * pSx / 2f;
+        // 睡着的时候整个人往下沉一点，好让云朵把下半身盖住（参考图里是躺在云上）
+        float bottom = hh - h * 0.08f + (pDy - poseLift) * h + (sleeping ? h * 0.16f : 0f);
+        float span = h * pSy * poseSquash * poseScale;
+        float top = bottom - span;
+        float halfW = w * pSx * poseScale / poseSquash / 2f;
 
         RectF dst = new RectF(cx - halfW, top, cx + halfW, bottom);
         canvas.save();
-        canvas.rotate(dragging ? dragTilt : 0f, cx, hh - h * 0.10f);
+        // 以立绘中心为支点倾斜：窗口只留了 22% 横向余量，绕脚转会甩出窗口被裁掉
+        canvas.rotate((dragging ? dragTilt : 0f) + poseLean, cx, bottom - span / 2f);
+        if (mirrorX) canvas.scale(-1f, 1f, cx, 0f);
         canvas.drawBitmap(cur, null, dst, paint);
         canvas.restore();
     }
@@ -453,8 +597,8 @@ public class PetView extends View implements Choreographer.FrameCallback {
                 if (dragging) {
                     dragging = false;
                     dragTilt = 0f;
-                    if (listener != null) listener.onDragEnd(rx, ry);
-                } else {
+                    if (e.getActionMasked() == MotionEvent.ACTION_UP && listener != null) listener.onDragEnd(rx, ry);
+                } else if (e.getActionMasked() == MotionEvent.ACTION_UP && !longPressed) {
                     cycleFace();
                     tapNs = System.nanoTime();
                     invalidate();
