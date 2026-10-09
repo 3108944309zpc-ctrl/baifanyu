@@ -8,8 +8,8 @@ android {
         applicationId "com.whalepet"
         minSdk 24
         targetSdk 36
-        versionCode 3
-        versionName "0.7.1-soundfix"
+        versionCode 12
+        versionName "0.8.2"
     }
 
     compileOptions {

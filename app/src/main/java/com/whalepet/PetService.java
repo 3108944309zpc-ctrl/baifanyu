@@ -20,6 +20,7 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.LinearLayout;
@@ -47,6 +48,7 @@ public class PetService extends Service implements PetView.Listener {
     public static final String ACTION_SOUND_DIAG = "com.whalepet.SOUND_DIAG";
     public static final String ACTION_SET_HIDDEN = "com.whalepet.SET_HIDDEN";
     public static final String ACTION_NEXT_SKIN = "com.whalepet.NEXT_SKIN";
+    public static final String ACTION_PREVIEW_DUCK = "com.whalepet.PREVIEW_DUCK";
     public static final String EXTRA_COUNT = "count";
     public static final String EXTRA_HIDDEN = "hidden";
 
@@ -56,9 +58,17 @@ public class PetService extends Service implements PetView.Listener {
 
     // 小黄鸭音效。用 SoundPool 而不是 MediaPlayer —— 短音效的延迟低得多，连点也不会卡。
     private SoundPool soundPool;
-    private final int[] duckIds = new int[3];
+    private final int[] duckIds = new int[DUCK_COUNT];
+    private int duckSel = 0;
     private boolean soundOn = true;
-    private final int[] duckLoadStatus = new int[] { -999, -999, -999 };
+    // 长度必须跟着 DUCK_COUNT 走。写死 3 个的话，音效加到 8 个就会越界崩溃。
+    private final int[] duckLoadStatus = newDuckStatus();
+
+    private static int[] newDuckStatus() {
+        int[] a = new int[DUCK_COUNT];
+        java.util.Arrays.fill(a, -999);
+        return a;
+    }
     private final Random rnd = new Random();
     /** 静音提示的节流时间戳，避免连点时刷屏 */
     private long lastSilentHintMs = 0L;
@@ -80,6 +90,9 @@ public class PetService extends Service implements PetView.Listener {
     public static final String KEY_AMP = "amp_scale";
     public static final String KEY_SOUND = "sound_on";
     public static final String KEY_SKIN = "skin_index";
+    public static final String KEY_X = "pos_x";
+    public static final String KEY_DUCK = "duck_index";
+    public static final int DUCK_COUNT = 8;
     public static final String KEY_WANDER = "wander_on";
     public static final String KEY_RUNNING = "running";
     public static final String KEY_EDGE = "edge";
@@ -108,6 +121,9 @@ public class PetService extends Service implements PetView.Listener {
     };
 
     private int screenW, screenH;
+    /** 趴边时累计"往外拉了多少"。位置会一直贴回边缘，但拉出量必须留着， */
+    /** 否则一松手就归零，她永远脱离不了边缘（上一版就栽在这）。 */
+    private int perchPull = 0;
 
     private final BroadcastReceiver screenRx = new BroadcastReceiver() {
         @Override public void onReceive(Context c, Intent i) {
@@ -124,8 +140,7 @@ public class PetService extends Service implements PetView.Listener {
         super.onCreate();
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         wm = (WindowManager) getSystemService(WINDOW_SERVICE);
-        screenW = getResources().getDisplayMetrics().widthPixels;
-        screenH = getResources().getDisplayMetrics().heightPixels;
+        measureScreen();
         createChannel();
 
         soundOn = prefs.getBoolean(KEY_SOUND, true);
@@ -140,6 +155,13 @@ public class PetService extends Service implements PetView.Listener {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        // intent == null 说明是系统把服务"粘性重启"了（START_STICKY）。
+        // 以前这里默认按 ACTION_SHOW 走 —— 于是用户从最近任务里划掉 App 之后，
+        // 过一阵系统把服务拉起来，她又自己冒出来了（网友反馈过"开游戏加载时她会出现"）。
+        if (intent == null && !prefs.getBoolean(KEY_RUNNING, false)) {
+            stopSelf();
+            return START_NOT_STICKY;
+        }
         String action = intent == null ? ACTION_SHOW : intent.getAction();
         startForeground(NOTI_ID, buildNotification());
 
@@ -174,6 +196,14 @@ public class PetService extends Service implements PetView.Listener {
             }
             return START_STICKY;
         }
+        if (ACTION_PREVIEW_DUCK.equals(action)) {
+            duckSel = prefs.getInt(KEY_DUCK, 0);
+            if (soundPool != null) {
+                int i = Math.max(0, Math.min(duckIds.length - 1, duckSel));
+                if (duckIds[i] != 0) soundPool.play(duckIds[i], 1f, 1f, 1, 0, 1f);
+            }
+            return START_STICKY;
+        }
         if (ACTION_SET_HIDDEN.equals(action)) {
             // 我们自己的设置页在前台时，必须把她收起来 ——
             // 悬浮窗永远在最上层，不收起来就会盖住自己的界面。
@@ -203,6 +233,18 @@ public class PetService extends Service implements PetView.Listener {
             enterPerch(prefs.getInt(KEY_EDGE, 0) == 1, false);
         }
         return START_STICKY;
+    }
+
+    /**
+     * 用户从「最近任务」里划掉了 App —— 这是明确的"我不要它跑"。
+     * 真的收起来，别让系统过一会儿把服务拉起来、她又冒出来。
+     */
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        prefs.edit().putBoolean(KEY_RUNNING, false).apply();
+        removePet();
+        stopSelf();
+        super.onTaskRemoved(rootIntent);
     }
 
     @Override
@@ -251,10 +293,22 @@ public class PetService extends Service implements PetView.Listener {
             view = null;
             return false;
         }
+        // 恢复上次的样子。不恢复的话，从设置页回来她会变成一个
+        // "站在屏幕正中间、默认皮肤、默认表情"的新人 —— 趴边状态也会丢。
+        int sk = prefs.getInt(KEY_SKIN, 0);
+        if (sk > 0 && sk < PetView.SKINS.length) view.applySkin(sk);
         if (pendingFace != 0) {
             view.setFace(pendingFace);
             pendingFace = 0;
         }
+        if (prefs.getBoolean(KEY_PERCHED, false)) {
+            enterPerch(prefs.getInt(KEY_EDGE, 0) == 1, false);   // 她本来是扒在边上的
+        } else {
+            lp.x = prefs.getInt(KEY_X, lp.x);
+            applyLayout();
+        }
+        // 定时器状态按当前开关重建，杜绝"开关关了还爬"
+        restartWander();
         return true;
     }
 
@@ -263,6 +317,8 @@ public class PetService extends Service implements PetView.Listener {
             try { wm.removeView(view); } catch (Exception ignored) { }
         }
         view = null;
+        // 不重置的话，她回来之后自动溜达的定时器永远不会重新挂上
+        wanderStarted = false;
     }
 
     private boolean canDrawOverlays() {
@@ -276,8 +332,13 @@ public class PetService extends Service implements PetView.Listener {
         // 这两个开关跟"她在不在窗口里"无关，必须先更新。
         // 设置页打开时她已经从窗口移除（view == null），以前的写法会在这里提前
         // return，于是拨动音效开关后 soundOn 一直是旧值 —— 开关看着像失灵。
+        boolean prevWander = wanderOn;
         soundOn = prefs.getBoolean(KEY_SOUND, true);
         wanderOn = prefs.getBoolean(KEY_WANDER, true);
+        duckSel = prefs.getInt(KEY_DUCK, 0);
+        // 开关动过就重挂一次定时器 —— 不重挂的话，那个 tick 一旦退出就再也回不来，
+        // 表现为"关了还爬"或者"开了不爬"。
+        if (wanderOn != prevWander) restartWander();
         if (view == null || lp == null) return;
         view.setHoverHeightDp(prefs.getFloat(KEY_HOVER_H, DEFAULT_HOVER_H));
         view.setPerchWidthDp(prefs.getFloat(KEY_PERCH_W, DEFAULT_PERCH_W));
@@ -302,6 +363,32 @@ public class PetService extends Service implements PetView.Listener {
         }
         clamp();
         try { wm.updateViewLayout(view, lp); } catch (Exception ignored) { }
+    }
+
+    /**
+     * 量真实的显示区域。
+     *
+     * 不能用 getResources().getDisplayMetrics().heightPixels —— 它不含导航栏，
+     * 于是她最多只能停在导航栏上方，怎么拖都到不了屏幕最底部（用户反馈过）。
+     */
+    private void measureScreen() {
+        try {
+            WindowManager w = (WindowManager) getSystemService(WINDOW_SERVICE);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                android.graphics.Rect b = w.getCurrentWindowMetrics().getBounds();
+                screenW = b.width();
+                screenH = b.height();
+            } else {
+                android.util.DisplayMetrics dm = new android.util.DisplayMetrics();
+                w.getDefaultDisplay().getRealMetrics(dm);
+                screenW = dm.widthPixels;
+                screenH = dm.heightPixels;
+            }
+        } catch (Exception e) {
+            android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+            screenW = dm.widthPixels;
+            screenH = dm.heightPixels;
+        }
     }
 
     private void clamp() {
@@ -367,11 +454,23 @@ public class PetService extends Service implements PetView.Listener {
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                         | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
                         | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                        // 点菜单外面的地方也把菜单收掉（原来只能等 6 秒自动消失）
+                        | WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
                 PixelFormat.TRANSLUCENT);
         menuLp.gravity = Gravity.TOP | Gravity.START;
         menuLp.x = 0;
         menuLp.y = 0;
+        // 收到 ACTION_OUTSIDE = 用户点了菜单外面 → 收起
+        row.setOnTouchListener(new View.OnTouchListener() {
+            @Override public boolean onTouch(View v, MotionEvent ev) {
+                if (ev.getActionMasked() == MotionEvent.ACTION_OUTSIDE) {
+                    hideMenu();
+                    return true;
+                }
+                return false;
+            }
+        });
         menuView = row;
 
         try {
@@ -431,6 +530,7 @@ public class PetService extends Service implements PetView.Listener {
 
     private void enterPerch(boolean right, boolean persist) {
         if (view == null) return;
+        perchPull = 0;
         view.setState(PetView.STATE_PERCH);
         view.setMirror(right);
         lp.width = Math.round(view.perchWindowW());
@@ -454,29 +554,47 @@ public class PetService extends Service implements PetView.Listener {
     // ---- PetView.Listener ----
 
     @Override
-    public void onDragStart() { hideMenu(); }
+    public void onDragStart() { hideMenu(); perchPull = 0; }
 
     @Override
     public void onDrag(float dx, float dy) {
         if (view == null) return;
-        lp.x += Math.round(dx);
         lp.y += Math.round(dy);
+
         if (view.getState() == PetView.STATE_PERCH) {
-            if (lp.x > screenW * 0.15f && lp.x < screenW * 0.85f) {
+            boolean right = prefs.getInt(KEY_EDGE, 0) == 1;
+            // "往外拉"的方向：贴右边时往左拉才算数，贴左边时往右拉才算数
+            perchPull += Math.round(right ? -dx : dx);
+            if (perchPull < 0) perchPull = 0;             // 往里推不算
+            if (perchPull > screenW * 0.12f) {            // 拉够远了 → 脱离边缘
+                perchPull = 0;
+                lp.x = right ? screenW - lp.width : 0;
                 exitPerch();
                 return;
             }
+            // 没拉够：位置贴回边缘，但 perchPull 留着（关键，别再抹掉）
+            lp.x = right ? screenW - lp.width : 0;
         } else {
-            clamp();
+            lp.x += Math.round(dx);
         }
+
+        clamp();
         try { wm.updateViewLayout(view, lp); } catch (Exception ignored) { }
     }
 
     @Override
     public void onDragEnd(float rawX, float rawY) {
         if (view == null) return;
-        prefs.edit().putInt(KEY_Y, lp.y).apply();
-        if (view.getState() == PetView.STATE_PERCH) return;
+        prefs.edit().putInt(KEY_Y, lp.y).putInt(KEY_X, lp.x).apply();
+        if (view.getState() == PetView.STATE_PERCH) {
+            // 兜底：松手时还停在趴边态，就确保她贴回边上（上下位置保留）
+            perchPull = 0;
+            lp.x = (prefs.getInt(KEY_EDGE, 0) == 1) ? screenW - lp.width : 0;
+            clamp();
+            try { wm.updateViewLayout(view, lp); } catch (Exception ignored) { }
+            return;
+        }
+        perchPull = 0;
 
         // 吸附判定不能用一个固定像素值：她调小之后窗口本身就窄，
         // 固定的 56dp 会占掉她宽度的一大半，导致"稍微靠近边缘"就被吸走。
@@ -532,6 +650,11 @@ public class PetService extends Service implements PetView.Listener {
         duckIds[0] = soundPool.load(this, R.raw.duck1, 1);
         duckIds[1] = soundPool.load(this, R.raw.duck2, 1);
         duckIds[2] = soundPool.load(this, R.raw.duck3, 1);
+        duckIds[3] = soundPool.load(this, R.raw.duck4, 1);
+        duckIds[4] = soundPool.load(this, R.raw.duck5, 1);
+        duckIds[5] = soundPool.load(this, R.raw.duck6, 1);
+        duckIds[6] = soundPool.load(this, R.raw.duck7, 1);
+        duckIds[7] = soundPool.load(this, R.raw.duck8, 1);
         android.util.Log.d("WhalePetAudio", "load ids="
                 + duckIds[0] + "," + duckIds[1] + "," + duckIds[2]);
     }
@@ -542,7 +665,9 @@ public class PetService extends Service implements PetView.Listener {
      */
     private int playDuckSound() {
         if (soundPool == null) return 0;
-        int id = duckIds[rnd.nextInt(duckIds.length)];
+        // 放用户选中的那一个（原来是从 8 个里随机挑 —— 用户没得选）
+        int sel = Math.max(0, Math.min(duckIds.length - 1, duckSel));
+        int id = duckIds[sel];
         if (id == 0) {
             loadDuckSounds();
             return 0;
@@ -689,6 +814,25 @@ public class PetService extends Service implements PetView.Listener {
             wanderHandler.postDelayed(this, 16);
         }
     };
+
+    /**
+     * 按当前开关重新挂一次溜达定时器。
+     *
+     * wanderTick 退出时不会再排下一次（这是有意的：关掉就该停），
+     * 但那样一来它就无法自己恢复 —— 必须由外部重新挂上。
+     */
+    private void restartWander() {
+        wanderHandler.removeCallbacks(wanderTick);
+        wanderStarted = false;
+        if (!wanderOn) {
+            if (view != null) view.setWalking(false);   // 立刻停下，别等下一次 tick
+            return;
+        }
+        if (view != null && lp != null) {
+            wanderStarted = true;
+            wanderHandler.postDelayed(wanderTick, 4000);
+        }
+    }
 
     private void createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

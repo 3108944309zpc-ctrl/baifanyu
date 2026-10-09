@@ -29,6 +29,7 @@ The artwork is NOT covered by this license.
   app/src/main/assets/
   app/src/main/res/mipmap-*/
   app/src/main/res/drawable-nodpi/
+  app/src/main/res/raw/
   docs/
 
 The image assets in the directories listed above are community fan art and are
