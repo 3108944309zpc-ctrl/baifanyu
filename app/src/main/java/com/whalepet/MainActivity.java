@@ -314,7 +314,7 @@ public class MainActivity extends Activity {
         PetView.Skin skin = PetView.SKINS[ski % PetView.SKINS.length];
         int faces = countFaces(ski % PetView.SKINS.length);
         tvStatus.setText((overlay
-                ? (running ? "状态：正在陪你。拖到屏幕左右边缘松手，她会扒在边上。" : "状态：已就绪，点下面的按钮让她出现。")
+                ? (running ? "状态：正在陪你。拖到屏幕边缘（左 / 右 / 下边）松手，她会扒在边上。" : "状态：已就绪，点下面的按钮让她出现。")
                 : "状态：还差一步 —— 需要「显示在其他应用上层」权限，否则她没法浮在别的应用上面。")
                 + "\n当前皮肤：" + skin.name + " · 表情 " + faces + " / " + skin.faces.length
                 + (faces < skin.faces.length ? "（素材缺失，重新装一次）" : "")

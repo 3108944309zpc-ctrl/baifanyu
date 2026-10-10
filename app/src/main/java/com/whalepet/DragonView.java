@@ -38,6 +38,10 @@ public final class DragonView extends View {
     public static final int SLEEPY = 6;
     public static final int STATE_HOVER = 0;
     public static final int STATE_PERCH = 1;
+    /** 扒在哪条边上 —— 和大肥鱼 PetView 用同一套取值，方便 Service 两边同一套判断。 */
+    public static final int EDGE_LEFT = 0;
+    public static final int EDGE_RIGHT = 1;
+    public static final int EDGE_BOTTOM = 2;
     private static final String DIR = "characters/gpt_dragon_girl/";
     private static final long LONG_PRESS_MS = 800L;
     /**
@@ -76,6 +80,8 @@ public final class DragonView extends View {
     /** 演小剧场时才把窗口横向留宽一点，给倾斜的头顶留地方；平时是 1。 */
     private float poseSlack = 1f;
     private float perchWidthDp = 86f;
+    /** 当前趴在哪条边（只在 STATE_PERCH 时有意义）。 */
+    private int perchEdge = EDGE_LEFT;
     private Bitmap rotated;
     private float hoverHeightDp = 190f;
     private float ampScale = 0.75f;
@@ -164,9 +170,49 @@ public final class DragonView extends View {
         requestLayout();
         invalidate();
     }
-    /** 趴边时那一条脑袋的宽 / 高 —— 和大肥鱼一样的算法：宽度自己定，高度按比例算。 */
-    public float perchWindowW() { return dp(perchWidthDp) * 1.10f; }
-    public float perchWindowH() { return dp(perchWidthDp) * perchStripRatio() * 1.16f; }
+    /**
+     * 趴边时露出来的那一块。
+     *
+     * 左右边：滑块 = 脑袋那条的**宽度**，高按旋转后的长宽比推。
+     * 下边：滑块 = 脑袋的**高度**（和大肥鱼趴下边时同一个含义），宽按立绘里脑袋框的长宽比推 ——
+     * 两个角色趴下边的"滑块管多大"手感就一致了。
+     */
+    public float perchWindowW() {
+        return perchEdge == EDGE_BOTTOM
+                ? dp(perchWidthDp) * headAspect() * 1.10f
+                : dp(perchWidthDp) * 1.10f;
+    }
+    public float perchWindowH() {
+        return perchEdge == EDGE_BOTTOM
+                ? dp(perchWidthDp) * 1.14f + perchBottomTopPad()
+                : dp(perchWidthDp) * perchStripRatio() * 1.16f;
+    }
+    /** 趴屏幕下边时露在屏幕上方的高度（= 滑块）。Service 用它把窗口钉在屏幕下沿。 */
+    public float perchVisibleH() { return dp(perchWidthDp); }
+    /**
+     * 趴屏幕下边时，窗户比脑袋再往上多留一条 —— 留给气泡。
+     *
+     * 不加这条的话，气泡只能画在她脸上（窗口就脑袋那么高）。
+     * 注意它只把窗口往上撑，脑袋的位置不动：Service 钉下沿时把这个值一起加回去，
+     * 露在屏幕上方的脑袋高度仍然是 perchVisibleH()，不会因为气泡变矮。
+     */
+    public float perchBottomTopPad() { return perchEdge == EDGE_BOTTOM ? dp(38f) : 0f; }
+    public void setPerchEdge(int value) {
+        if (perchEdge == value) return;
+        perchEdge = value;
+        requestLayout();
+        invalidate();
+    }
+    public int getPerchEdge() { return perchEdge; }
+    /** 不旋转时脑袋框的长宽比（给趴下边算宽度用）。 */
+    private float headAspect() {
+        Bitmap b = current;
+        float sw = b == null ? 384f : b.getWidth();
+        float sh = b == null ? 480f : b.getHeight();
+        float headW = Math.max(1f, (HEAD_X1 - HEAD_X0) * sw);
+        float headH = Math.max(1f, (HEAD_Y1 - HEAD_Y0) * sh);
+        return headW / headH;
+    }
     public void setPerchWidthDp(float value) {
         perchWidthDp = Math.max(56f, Math.min(160f, value));
         requestLayout();
@@ -398,6 +444,8 @@ public final class DragonView extends View {
      * 这三样都跟着她自己的"动作幅度"滑块走，调到最小就几乎不动。
      */
     private void drawPerch(Canvas canvas, float t, float dy, float sy) {
+        // 趴屏幕下边是另一套画法：不旋转，直接让她从下沿探出头来
+        if (perchEdge == EDGE_BOTTOM) { drawPerchBottom(canvas, t, sy); return; }
         if (rotated == null || rotated.isRecycled()) rotated = rotate90(current);
         if (rotated == null) return;
         Rect src = headSrc(rotated);
@@ -412,6 +460,45 @@ public final class DragonView extends View {
         if (mirror) canvas.scale(-1f, 1f, getWidth() / 2f, 0f);
         canvas.drawBitmap(rotated, src, dst, paint);
         canvas.restore();
+    }
+
+    /**
+     * 趴屏幕下边：不旋转，把立绘里的脑袋框整块往下沿放，下巴贴着窗口下沿 ——
+     * 窗口下沿就是屏幕下沿（窗口比脑袋高 14%，多出来的那截露在屏幕外，
+     * 所以实际露在屏幕上方的正好是滑块的 86%，跟大肥鱼趴下边一样的比例）。
+     *
+     * 呼吸（sy）只往上长，下巴一直贴着下沿，看起来才像"从屏幕下边探出头"，
+     * 而不是整块上下平移。
+     */
+    private void drawPerchBottom(Canvas canvas, float t, float sy) {
+        if (current == null) return;
+        Rect src = headSrcUpright(current);
+        float h = dp(perchWidthDp);
+        float w = h * src.width() / (float) src.height();
+        float tau = (float) (Math.PI * 2.0);
+        // 左右轻轻探头，和大肥鱼趴下边一样有个"活的"感觉
+        float peek = dp(perchWidthDp) * 0.02f * (1f + (float) Math.sin(tau * t / 2.4f - 1.2f));
+        float hh = h * sy;
+        float top = getHeight() - hh;
+        RectF dst = new RectF(peek, top, peek + w, top + hh);
+        canvas.save();
+        if (mirror) canvas.scale(-1f, 1f, getWidth() / 2f, 0f);
+        canvas.drawBitmap(current, src, dst, paint);
+        canvas.restore();
+    }
+
+    /** 不旋转的立绘里，"脑袋那一块"是哪个矩形（趴屏幕下边用）。 */
+    private Rect headSrcUpright(Bitmap b) {
+        int bw = b.getWidth(), bh = b.getHeight();
+        int x0 = Math.round(HEAD_X0 * bw);
+        int x1 = Math.round(HEAD_X1 * bw);
+        int y0 = Math.round(HEAD_Y0 * bh);
+        int y1 = Math.round(HEAD_Y1 * bh);
+        x0 = Math.max(0, Math.min(bw - 1, x0));
+        x1 = Math.max(x0 + 1, Math.min(bw, x1));
+        y0 = Math.max(0, Math.min(bh - 1, y0));
+        y1 = Math.max(y0 + 1, Math.min(bh, y1));
+        return new Rect(x0, y0, x1, y1);
     }
 
     /**

@@ -541,7 +541,10 @@ public class PetService extends Service implements PetView.Listener, DragonView.
         raiseBubbleLayer();          // 角色窗口是后加的，会盖住气泡层，这里把气泡层重新提到最上
         // 她上次是扒在边上的话，回来还得是扒着的样子
         if (prefs.getBoolean(KEY_DRAGON_PERCHED, false)) {
-            enterDragonPerch(prefs.getInt(KEY_DRAGON_EDGE, 0) == 1, false);
+            // 和大肥鱼一样：要认得出"趴屏幕下边"，不然从设置页回来她会从趴下边变成扒左边
+            int de = prefs.getInt(KEY_DRAGON_EDGE, 0);
+            if (de == DragonView.EDGE_BOTTOM) enterDragonPerchBottom(false);
+            else enterDragonPerch(de == 1, false);
         }
         // 溜达的定时器按当前开关重建，跟大肥鱼一样
         restartDragonWander();
@@ -587,6 +590,16 @@ public class PetService extends Service implements PetView.Listener, DragonView.
     private void clampDragon() {
         if (dragonLp == null) return;
         dragonLp.x = Math.max(0, Math.min(screenW - dragonLp.width, dragonLp.x));
+        // 趴屏幕下边时她本来就该有一部分在屏幕外，不能按普通规则夹 y。
+        // 和大肥鱼 clamp() 里那段一个道理：用脑袋真实高度定位，不是窗口高度
+        // （窗口比脑袋高，拿窗口高度会让她离下沿差出一截）。
+        if (dragonView != null && dragonView.getState() == DragonView.STATE_PERCH
+                && dragonView.getPerchEdge() == DragonView.EDGE_BOTTOM) {
+            // 顶上那条气泡留白要一起加回去：窗口往上撑，脑袋的位置不动
+            dragonLp.y = Math.round(screenH
+                    - (dragonView.perchVisibleH() + dragonView.perchBottomTopPad()) * BOTTOM_VISIBLE);
+            return;
+        }
         dragonLp.y = Math.max(0, Math.min(screenH - dragonLp.height, dragonLp.y));
     }
 
@@ -930,7 +943,11 @@ public class PetService extends Service implements PetView.Listener, DragonView.
         }
         if (dragonView != null && dragonLp != null) {
             if (dragonView.getState() == DragonView.STATE_PERCH) {
-                enterDragonPerch(prefs.getInt(KEY_DRAGON_EDGE, 0) == 1, false);
+                // 转屏 / 换屏之后照她**现在真正趴着的那条边**重贴，
+                // 不读 prefs：视图才是真实状态（persist=false 的路径 prefs 会滞后）
+                int de = dragonView.getPerchEdge();
+                if (de == DragonView.EDGE_BOTTOM) enterDragonPerchBottom(false);
+                else enterDragonPerch(de == DragonView.EDGE_RIGHT, false);
             } else {
                 applyDragonLayout();
             }
@@ -1153,9 +1170,11 @@ public class PetService extends Service implements PetView.Listener, DragonView.
 
     private void enterDragonPerch(boolean right, boolean persist) {
         if (dragonView == null || dragonLp == null) return;
+        measureScreen();                                    // 兜底：转屏监听没触发时也要用最新屏幕尺寸
         dragonPerchPull = 0;
         dragonPerchSinceMs = System.currentTimeMillis();     // 开始计时
         dragonView.setPerchWidthDp(dragonPerchWidthDp());
+        dragonView.setPerchEdge(right ? DragonView.EDGE_RIGHT : DragonView.EDGE_LEFT);
         dragonView.setState(DragonView.STATE_PERCH);
         dragonView.setMirror(right);
         dragonLp.width = dragonView.windowW();
@@ -1168,6 +1187,32 @@ public class PetService extends Service implements PetView.Listener, DragonView.
                     .putInt(KEY_DRAGON_EDGE, right ? 1 : 0).apply();
         }
         resetDragonWanderTarget();      // 站边上了，之前挑的溜达目标作废
+    }
+
+    /**
+     * 趴到屏幕下边：脑袋从下沿探出来，水平位置不动。
+     *
+     * 和大肥鱼 enterPerchBottom() 是同一套：窗口宽度按脑袋长宽比推、y 交给
+     * clampDragon() 钉在屏幕下沿（不是这里写死，免得两处各算一套）。
+     */
+    private void enterDragonPerchBottom(boolean persist) {
+        if (dragonView == null || dragonLp == null) return;
+        measureScreen();
+        dragonPerchPull = 0;
+        dragonPerchSinceMs = System.currentTimeMillis();     // 开始计时（趴下边也会睡着）
+        dragonView.setPerchWidthDp(dragonPerchWidthDp());
+        dragonView.setPerchEdge(DragonView.EDGE_BOTTOM);
+        dragonView.setState(DragonView.STATE_PERCH);
+        dragonView.setMirror(false);
+        dragonLp.width = dragonView.windowW();
+        dragonLp.height = dragonView.windowH();
+        clampDragon();   // clampDragon 里会把 y 钉在屏幕下沿
+        try { wm.updateViewLayout(dragonView, dragonLp); } catch (Exception ignored) { }
+        if (persist) {
+            prefs.edit().putBoolean(KEY_DRAGON_PERCHED, true)
+                    .putInt(KEY_DRAGON_EDGE, DragonView.EDGE_BOTTOM).apply();
+        }
+        resetDragonWanderTarget();
     }
 
     private void exitDragonPerch() {
@@ -1929,8 +1974,23 @@ public class PetService extends Service implements PetView.Listener, DragonView.
         if (dragonLp == null || dragonView == null) return;
         dragonLp.y += Math.round(dy);
 
+        if (dragonView.getState() == DragonView.STATE_PERCH
+                && dragonView.getPerchEdge() == DragonView.EDGE_BOTTOM) {
+            // 趴在下边：往上拉才把她拉起来（左右拉不算）—— 和大肥鱼同一套
+            dragonPerchPull += Math.round(-dy);
+            if (dragonPerchPull < 0) dragonPerchPull = 0;
+            if (dragonPerchPull > screenH * 0.08f) {
+                dragonPerchPull = 0;
+                exitDragonPerch();
+                return;
+            }
+            clampDragon();   // 还趴着：钉回屏幕下沿
+            try { wm.updateViewLayout(dragonView, dragonLp); } catch (Exception ignored) { }
+            return;
+        }
+
         if (dragonView.getState() == DragonView.STATE_PERCH) {
-            boolean right = prefs.getInt(KEY_DRAGON_EDGE, 0) == 1;
+            boolean right = dragonView.getPerchEdge() == DragonView.EDGE_RIGHT;
             dragonPerchPull += Math.round(right ? -dx : dx);
             if (dragonPerchPull < 0) dragonPerchPull = 0;
             if (dragonPerchPull > screenW * 0.12f) {
@@ -1954,7 +2014,12 @@ public class PetService extends Service implements PetView.Listener, DragonView.
         if (dragonView.getState() == DragonView.STATE_PERCH) {
             // 兜底：松手时还扒着，就确保她还贴在边上（上下位置保留）
             dragonPerchPull = 0;
-            dragonLp.x = (prefs.getInt(KEY_DRAGON_EDGE, 0) == 1) ? screenW - dragonLp.width : 0;
+            // 趴屏幕下边时不能按"贴左/贴右"重算 x —— 她本来就在下沿，
+            // 由 clampDragon() 把 y 钉回下沿即可（和大肥鱼 onDragEnd 同一处理）
+            if (dragonView.getPerchEdge() != DragonView.EDGE_BOTTOM) {
+                dragonLp.x = dragonView.getPerchEdge() == DragonView.EDGE_RIGHT
+                        ? screenW - dragonLp.width : 0;
+            }
             clampDragon();
             try { wm.updateViewLayout(dragonView, dragonLp); } catch (Exception ignored) { }
             return;
@@ -1965,6 +2030,10 @@ public class PetService extends Service implements PetView.Listener, DragonView.
         float snap = Math.min(snapDp, dragonLp.width * 0.25f);
         if (dragonLp.x <= snap) enterDragonPerch(false, true);
         else if (dragonLp.x + dragonLp.width >= screenW - snap) enterDragonPerch(true, true);
+        // 拖到屏幕下沿附近 → 趴到下边去（放在左右之后，角落处优先左右）
+        else if (dragonLp.y + dragonLp.height >= screenH - Math.min(snapDp, dragonLp.height * 0.30f)) {
+            enterDragonPerchBottom(true);
+        }
         else applyDragonLayout();
         startOverlapInteractionIfNeeded();
         armOverlapInteraction();
