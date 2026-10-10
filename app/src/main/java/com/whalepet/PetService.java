@@ -7,6 +7,7 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.ComponentCallbacks;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
@@ -98,6 +99,7 @@ public class PetService extends Service implements PetView.Listener, DragonView.
     public static final String KEY_SOUND = "sound_on";
     public static final String KEY_SKIN = "skin_index";
 
+    // 本分支新增（上游没有）：默认皮肤
     /**
      * 大肥鱼默认皮肤 = 女仆装（SKINS 里的索引 1）。
      *
@@ -241,8 +243,17 @@ public class PetService extends Service implements PetView.Listener, DragonView.
     /** 趴边时累计"往外拉了多少"。位置会一直贴回边缘，但拉出量必须留着， */
     /** 否则一松手就归零，她永远脱离不了边缘（上一版就栽在这）。 */
     private int perchPull = 0;
+    // 两边都留
     /** 小龙女自己的"往外拉了多少"，跟大肥鱼各算各的。 */
     private int dragonPerchPull = 0;
+
+    /**
+     * 趴屏幕下边时露出多少。
+     * 1.0 = 整个脑袋都露出来，站在屏幕下沿上（不切）。
+     * 调小会让更多部分藏到屏幕外 —— 但要注意趴下边用的裁剪区比脸长，
+     * 调小了会先切到脸。
+     */
+    private static final float BOTTOM_VISIBLE = 1.0f;
 
     private final BroadcastReceiver screenRx = new BroadcastReceiver() {
         @Override public void onReceive(Context c, Intent i) {
@@ -266,6 +277,22 @@ public class PetService extends Service implements PetView.Listener, DragonView.
         hiddenForSettings = prefs.getBoolean(KEY_SETTINGS_OPEN, false);
         wm = (WindowManager) getSystemService(WINDOW_SERVICE);
         measureScreen();
+
+        // 上游新增，必须保留：屏幕旋转之后 screenW/screenH 会变，但 Service 不会自动收到通知 ——
+        // 不重新量的话，横屏时"扒右边"会算到屏幕中间去。
+        //
+        // 合并要点：上游原版在这里直接 measureScreen() 再手动重贴大肥鱼。本分支已经有一套
+        // 等价的 onScreenMetricsChanged()（onConfigurationChanged / 亮屏广播都会走它），
+        // 直接照抄上游会在两边都触发，而且它先把 screenW/screenH 量掉了，
+        // onScreenMetricsChanged() 的"尺寸没变就直接 return"就会误判、连小龙女都不重贴。
+        // 所以这里让它走同一条路径 —— 上游的意图（转屏后重新量 + 重新贴边）一字不差地保留，
+        // 顺带把小龙女也一起贴回去。
+        registerComponentCallbacks(new ComponentCallbacks() {
+            @Override public void onConfigurationChanged(Configuration cfg) {
+                onScreenMetricsChanged();
+            }
+            @Override public void onLowMemory() { }
+        });
         createChannel();
 
         soundOn = prefs.getBoolean(KEY_SOUND, true);
@@ -355,6 +382,8 @@ public class PetService extends Service implements PetView.Listener, DragonView.
             stopIfIdle();
             return START_STICKY;
         }
+        // 去重：git 自动合并把这一段生成了两份（本分支一份 + 上游一份，内容一致，
+        // 只有本分支这份多一次 stopIfIdle() 收尾）。只保留下面这一份。
         if (ACTION_PREVIEW_DUCK.equals(action)) {
             duckSel = prefs.getInt(KEY_DUCK, 0);
             if (soundPool != null) {
@@ -421,11 +450,17 @@ public class PetService extends Service implements PetView.Listener, DragonView.
         }
         armOverlapInteraction();
         if (view != null && prefs.getBoolean(KEY_PERCHED, false)) {
-            enterPerch(prefs.getInt(KEY_EDGE, 0) == 1, false);
+            // 合并要点：这里必须认上游新增的「趴屏幕下边」(EDGE_BOTTOM)，
+            // 不然从设置页回来她会从"趴下边"变成"扒左边"。
+            int eStart = prefs.getInt(KEY_EDGE, 0);
+            if (eStart == PetView.EDGE_BOTTOM) enterPerchBottom(false);
+            else enterPerch(eStart == 1, false);
         }
         return START_STICKY;
     }
 
+    // ==== 以下整段（syncFish … separateAfterInterruptedInteraction）是本分支新增：
+    // ==== 上游在这一段位置上没有任何内容，属于纯新增，全部保留。
     /** 按开关把大肥鱼放出来 / 收回去。 */
     private void syncFish() {
         if (hiddenForSettings) return;      // 设置页开着的时候先别放，免得盖住界面
@@ -646,6 +681,7 @@ public class PetService extends Service implements PetView.Listener, DragonView.
     @Override
     public void onTaskRemoved(Intent rootIntent) {
         prefs.edit().putBoolean(KEY_RUNNING, false).apply();
+        // 两边都留：上游的 removePet() 加上本分支的小龙女/气泡/互动收尾
         hideBubble();
         interactions.cancel();
         handler.removeCallbacks(overlapInteractionTick);
@@ -705,9 +741,12 @@ public class PetService extends Service implements PetView.Listener, DragonView.
             view = null;
             return false;
         }
+        // 两边都留：本分支的 raiseBubbleLayer()（气泡层重新提到最上）
         raiseBubbleLayer();          // 同上：角色窗口后加，气泡层要重新提到最上
         // 恢复上次的样子。不恢复的话，从设置页回来她会变成一个
         // "站在屏幕正中间、默认皮肤、默认表情"的新人 —— 趴边状态也会丢。
+        // 默认值用本分支的 DEFAULT_SKIN（女仆装）：上游这里写死 0（饭盆头），
+        // 与本分支"默认不戴锅盖"的要求冲突，故取 DEFAULT_SKIN；存过的值不受影响。
         int sk = prefs.getInt(KEY_SKIN, DEFAULT_SKIN);
         if (sk > 0 && sk < PetView.SKINS.length) view.applySkin(sk);
         if (pendingFace != 0) {
@@ -715,7 +754,11 @@ public class PetService extends Service implements PetView.Listener, DragonView.
             pendingFace = 0;
         }
         if (prefs.getBoolean(KEY_PERCHED, false)) {
-            enterPerch(prefs.getInt(KEY_EDGE, 0) == 1, false);   // 她本来是扒在边上的
+            // 取上游这份：它多处理了「趴屏幕下边」(EDGE_BOTTOM)，
+            // 是本分支那行 enterPerch(...) 的超集（左右边逻辑一致）。
+            int e0 = prefs.getInt(KEY_EDGE, 0);
+            if (e0 == PetView.EDGE_BOTTOM) enterPerchBottom(false);
+            else enterPerch(e0 == 1, false);
         } else {
             lp.x = prefs.getInt(KEY_X, lp.x);
             applyLayout();
@@ -730,6 +773,7 @@ public class PetService extends Service implements PetView.Listener, DragonView.
             try { wm.removeView(view); } catch (Exception ignored) { }
         }
         view = null;
+        // 本分支新增（上游没有）：
         // 互动是两个人的事，少一个就先停下，免得回调继续改表情 / 冒气泡
         interactions.cancel();
         hideBubble();
@@ -750,6 +794,7 @@ public class PetService extends Service implements PetView.Listener, DragonView.
         // 设置页打开时她已经从窗口移除（view == null），以前的写法会在这里提前
         // return，于是拨动音效开关后 soundOn 一直是旧值 —— 开关看着像失灵。
         boolean prevWander = wanderOn;
+        // 本分支新增：小龙女的溜达开关也要一起读、一起比对
         boolean prevDragonWander = dragonWanderOn;
         soundOn = prefs.getBoolean(KEY_SOUND, true);
         wanderOn = prefs.getBoolean(KEY_WANDER, true);
@@ -758,6 +803,7 @@ public class PetService extends Service implements PetView.Listener, DragonView.
         // 开关动过就重挂一次定时器 —— 不重挂的话，那个 tick 一旦退出就再也回不来，
         // 表现为"关了还爬"或者"开了不爬"。
         if (wanderOn != prevWander) restartWander();
+        // 本分支新增（上游没有）：
         if (dragonWanderOn != prevDragonWander) restartDragonWander();
         if (dragonView != null) {
             dragonView.setHoverHeightDp(prefs.getFloat(KEY_DRAGON_HEIGHT, 190f));
@@ -873,7 +919,11 @@ public class PetService extends Service implements PetView.Listener, DragonView.
         // 趴边的重新扒到新的边上；悬空的夹回新的可视范围
         if (view != null && lp != null) {
             if (view.getState() == PetView.STATE_PERCH) {
-                enterPerch(prefs.getInt(KEY_EDGE, 0) == 1, false);
+                // 合并要点：认上游新增的「趴屏幕下边」，否则转屏后她会从左/右边
+                // 变成趴下边（或反过来）。
+                int e1 = prefs.getInt(KEY_EDGE, 0);
+                if (e1 == PetView.EDGE_BOTTOM) enterPerchBottom(false);
+                else enterPerch(e1 == 1, false);
             } else {
                 applyLayout();
             }
@@ -890,10 +940,24 @@ public class PetService extends Service implements PetView.Listener, DragonView.
         resetDragonWanderTarget();
     }
 
+    // 去重：git 自动合并把 measureScreen() 生成了两份。
+    // 上面那份（含 getMaximumWindowMetrics + 方向纠正）是本分支的，功能更全，
+    // 且完整覆盖了上游那份的取值路径（currentWindowMetrics → realMetrics → 资源兜底），
+    // 因此删掉下面这份上游的重复定义。
+    // （上游原定义见 git show upstream/main:app/src/main/java/com/whalepet/PetService.java）
+
     private void clamp() {
         int w = lp.width, h = lp.height;
         if (lp.x < 0) lp.x = 0;
         if (lp.x > screenW - w) lp.x = Math.max(0, screenW - w);
+        // 趴屏幕下边时她本来就该有一部分在屏幕外，不能按普通规则夹 y
+        if (view != null && view.getState() == PetView.STATE_PERCH
+                && view.getPerchEdge() == PetView.EDGE_BOTTOM) {
+            // 用脑袋真实高度定位，不是窗口高度 —— 窗口比脑袋高，
+            // 拿窗口高度定位会让她离下沿差出一截。
+            lp.y = Math.round(screenH - view.perchVisibleH() * BOTTOM_VISIBLE);
+            return;
+        }
         int topLimit = -Math.round(h * 0.12f);
         int bottomLimit = screenH - Math.round(h * 0.88f);
         if (lp.y < topLimit) lp.y = topLimit;
@@ -1040,11 +1104,31 @@ public class PetService extends Service implements PetView.Listener, DragonView.
 
     // ---- 状态切换 ----
 
+    /** 趴到屏幕下边：脑袋从下沿探出来，水平位置不动 */
+    private void enterPerchBottom(boolean persist) {
+        if (view == null) return;
+        measureScreen();
+        perchPull = 0;
+        view.setState(PetView.STATE_PERCH);
+        view.setPerchEdge(PetView.EDGE_BOTTOM);
+        view.setMirror(false);
+        lp.width = Math.round(view.perchWindowW());
+        lp.height = Math.round(view.perchWindowH());
+        clamp();   // clamp 里会把 y 钉在屏幕下沿
+        try { wm.updateViewLayout(view, lp); } catch (Exception ignored) { }
+        if (persist) {
+            prefs.edit().putBoolean(KEY_PERCHED, true).putInt(KEY_EDGE, PetView.EDGE_BOTTOM).apply();
+        }
+    }
+
     private void enterPerch(boolean right, boolean persist) {
         if (view == null) return;
+        // 两边都留，且去重：`perchPull = 0` 两边都有，只留一份
+        measureScreen();   // 兜底：万一旋转监听没触发，这里也要用最新的屏幕尺寸
         perchPull = 0;
         fishPerchSinceMs = System.currentTimeMillis();      // 开始计时：趴够多久该睡
         view.setState(PetView.STATE_PERCH);
+        view.setPerchEdge(right ? PetView.EDGE_RIGHT : PetView.EDGE_LEFT);
         view.setMirror(right);
         lp.width = Math.round(view.perchWindowW());
         lp.height = Math.round(view.perchWindowH());
@@ -1725,6 +1809,8 @@ public class PetService extends Service implements PetView.Listener, DragonView.
     // ---- PetView.Listener ----
 
     @Override
+    // 取本分支这份：它是上游那行 `{ hideMenu(); perchPull = 0; }` 的超集，
+    // 另外带上打断互动、收气泡、把两人拉开的本分支逻辑。
     public void onDragStart() {
         hideMenu();
         boolean interrupting = interactions.isRunning();
@@ -1741,6 +1827,23 @@ public class PetService extends Service implements PetView.Listener, DragonView.
     public void onDrag(float dx, float dy) {
         if (view == null) return;
         lp.y += Math.round(dy);
+
+        // 两边都留：上游新增的「趴屏幕下边时往上拉才脱离」+ 本分支的左右扒边逻辑
+        // （左右扒边那段两边代码完全一致，只保留一份，避免重复）
+        if (view.getState() == PetView.STATE_PERCH
+                && view.getPerchEdge() == PetView.EDGE_BOTTOM) {
+            // 趴在下边：往上拉才把她拉起来（左右拉不算）
+            perchPull += Math.round(-dy);
+            if (perchPull < 0) perchPull = 0;
+            if (perchPull > screenH * 0.08f) {
+                perchPull = 0;
+                exitPerch();
+                return;
+            }
+            clamp();   // 还趴着：钉回屏幕下沿
+            try { wm.updateViewLayout(view, lp); } catch (Exception ignored) { }
+            return;
+        }
 
         if (view.getState() == PetView.STATE_PERCH) {
             boolean right = prefs.getInt(KEY_EDGE, 0) == 1;
@@ -1770,7 +1873,12 @@ public class PetService extends Service implements PetView.Listener, DragonView.
         if (view.getState() == PetView.STATE_PERCH) {
             // 兜底：松手时还停在趴边态，就确保她贴回边上（上下位置保留）
             perchPull = 0;
-            lp.x = (prefs.getInt(KEY_EDGE, 0) == 1) ? screenW - lp.width : 0;
+            // 合并要点：趴屏幕下边时不能按"贴左/贴右"重算 x —— 她本来就居中，
+            // 由 clamp() 把 y 钉回屏幕下沿即可（上游新增的 EDGE_BOTTOM）。
+            int eEnd = prefs.getInt(KEY_EDGE, 0);
+            if (eEnd != PetView.EDGE_BOTTOM) {
+                lp.x = (eEnd == 1) ? screenW - lp.width : 0;
+            }
             clamp();
             try { wm.updateViewLayout(view, lp); } catch (Exception ignored) { }
             return;
@@ -1784,6 +1892,8 @@ public class PetService extends Service implements PetView.Listener, DragonView.
         float snap = Math.min(snapDp, lp.width * 0.25f);
         if (lp.x <= snap) enterPerch(false, true);
         else if (lp.x + lp.width >= screenW - snap) enterPerch(true, true);
+        // 拖到屏幕下沿附近 → 趴到下边去（放在左右之后，角落处优先左右）
+        else if (lp.y + lp.height >= screenH - Math.min(snapDp, lp.height * 0.30f)) enterPerchBottom(true);
         else applyLayout();
         startOverlapInteractionIfNeeded();
     }
@@ -2127,6 +2237,7 @@ public class PetService extends Service implements PetView.Listener, DragonView.
             return;
         }
         if (view != null && lp != null) {
+            // 本分支新增（上游没有）：
             // 演出期间窗口被剧情挪走了，而 wanderX 还停在开演之前的位置 ——
             // 不重新对齐的话，溜达一恢复她就会"瞬移"回旧位置，
             // 刚拉开的那点距离也会被抹掉。
@@ -2137,6 +2248,7 @@ public class PetService extends Service implements PetView.Listener, DragonView.
         }
     }
 
+    // ==== 以下整段（小龙女的自动溜达）是本分支新增，上游该处没有任何内容，全部保留 ====
     // ---- 小龙女的自动溜达：和大肥鱼同一套代码，各用各的窗口和定时器 ----
 
     private boolean dragonWanderOn = true;

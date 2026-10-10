@@ -27,6 +27,8 @@ public class MainActivity extends Activity {
     private SharedPreferences prefs;
     private TextView tvStatus, tvHover, tvPerch, tvAmp;
     private SeekBar sbHover, sbPerch, sbAmp;
+    // 取本分支（fork）这份：它是上游那行 `... btnDuck;` / `swSound, swWander;` 的超集，
+    // 上游新增的 btnDuck 已经包含在内，另外带上本分支的小龙女/睡觉/活动范围/打闹控件字段。
     private Button btnPerm, btnToggle, btnFace, btnSkin, btnSoundDiag, btnDuck, btnDragonFace;
     private Switch swSound, swWander, swDragon, swFish, swDragonWander;
     private SeekBar sbDragonHeight, sbDragonPerch, sbDragonAmp;
@@ -228,6 +230,7 @@ public class MainActivity extends Activity {
         super.onPause();
     }
 
+    // 本分支新增（上游没有这段）：界面销毁时清掉「设置页开着」的记号
     @Override
     protected void onDestroy() {
         // 界面没了这个记号就必须清掉，否则服务重启后会一直以为设置页还开着、
@@ -315,6 +318,7 @@ public class MainActivity extends Activity {
                 : "状态：还差一步 —— 需要「显示在其他应用上层」权限，否则她没法浮在别的应用上面。")
                 + "\n当前皮肤：" + skin.name + " · 表情 " + faces + " / " + skin.faces.length
                 + (faces < skin.faces.length ? "（素材缺失，重新装一次）" : "")
+                // 本分支多一行「显示中：大肥鱼 / 小龙女」，并沿用上游「打开设置时会自动收起」的说明
                 + "\n显示中：" + (fish ? "大肥鱼" : "—") + " / " + (dragon ? "小龙女" : "—")
                 + "（两个都可以单独出现，全关掉就自动停下）"
                 + "\n（打开这个界面时她们会自动收起，免得挡住设置；回到桌面就回来）");

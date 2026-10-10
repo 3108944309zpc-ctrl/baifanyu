@@ -38,6 +38,9 @@ public class PetView extends View implements Choreographer.FrameCallback {
     public static final int STATE_HOVER = 0;
     public static final int STATE_PERCH = 1;
 
+    /** 扒在哪条边上 */
+    public static final int EDGE_LEFT = 0, EDGE_RIGHT = 1, EDGE_BOTTOM = 2;
+
     private static final String DIR_MAID = "skins/maid/";
     private static final String DIR_BASIN = "skins/basin/";
 
@@ -127,14 +130,19 @@ public class PetView extends View implements Choreographer.FrameCallback {
 
     private int srcW = 944, srcH = 1200;
     private int headX0, headX1, headY0, headY1;
+    /** 同一块裁剪区，但换算成「没旋转的原图」坐标（趴屏幕下边时用） */
+    private int headBX0, headBX1, headBY0, headBY1;
 
     private int state = STATE_HOVER;
     private boolean mirrorX = false;
+    // 两边都留：本分支的小剧场姿态通道（上游没有）
     // 小剧场姿态通道：倾斜（绕立绘中心转）、压扁回弹、临时抬升、整体缩放。
     // 只做整体变换，不改立绘本身 —— 用来演"靠、探、蹦、被推、被撞、贴住"。
     private float poseLean, poseLift, poseSquash = 1f, poseScale = 1f;
     /** 演小剧场时才把窗口横向留宽一点，给倾斜的头顶留地方；平时是 1。 */
     private float poseSlack = 1f;
+    // 两边都留：上游新增的「扒在哪条边」（左侧/右侧/下沿）
+    private int perchEdge = EDGE_LEFT;
     private float hoverHeightDp = 240f, perchWidthDp = 96f, ampScale = 0.75f;
 
     private float pDy, pSx = 1f, pSy = 1f;
@@ -224,10 +232,19 @@ public class PetView extends View implements Choreographer.FrameCallback {
         if (cur != null) {
             srcW = cur.getWidth();
             srcH = cur.getHeight();
+            // ↓ 这组是「旋转 90° 之后的图」坐标：x 用 srcH 且翻转、y 用 srcW
             headX0 = Math.round(srcH - 1 - s.hy1 * srcH);
             headX1 = Math.round(srcH - 1 - s.hy0 * srcH);
             headY0 = Math.round(s.hx0 * srcW);
             headY1 = Math.round(s.hx1 * srcW);
+
+            // ↓ 同一块区域换算回「原图坐标」，趴屏幕下边（不旋转）时必须用这组。
+            //   否则矩形会冲出原图右边界（basin: x 要到 1181，原图只有 992 宽），
+            //   画出来只剩左边一半。
+            headBX0 = Math.round(s.hx0 * srcW);
+            headBX1 = Math.round(s.hx1 * srcW);
+            headBY0 = Math.round(s.hy0 * srcH);
+            headBY1 = Math.round(s.hy1 * srcH);
         }
         requestLayout();
         invalidate();
@@ -347,6 +364,7 @@ public class PetView extends View implements Choreographer.FrameCallback {
     public int getState() { return state; }
     public void setMirror(boolean m) { mirrorX = m; invalidate(); }
 
+    // 两边都留：本分支的小剧场姿态 API
     /** 小剧场姿态：leanDeg 倾斜角度，squash 压扁（1=不变），liftUnit 抬升（以身高为单位），scale 整体缩放。 */
     public void setPose(float leanDeg, float squash, float liftUnit, float scale) {
         poseLean = leanDeg;
@@ -365,6 +383,10 @@ public class PetView extends View implements Choreographer.FrameCallback {
         invalidate();
     }
 
+    // 两边都留：上游新增的扒边方向 API
+    public void setPerchEdge(int e) { perchEdge = e; requestLayout(); invalidate(); }
+    public int getPerchEdge() { return perchEdge; }
+
     public void setHoverHeightDp(float v) { hoverHeightDp = v; requestLayout(); invalidate(); }
     public void setPerchWidthDp(float v) { perchWidthDp = v; requestLayout(); invalidate(); }
     public float getHoverHeightDp() { return hoverHeightDp; }
@@ -375,8 +397,21 @@ public class PetView extends View implements Choreographer.FrameCallback {
 
     public float windowW() { return dp(hoverHeightDp) * srcW / (float) srcH * poseSlack; }
     public float windowH() { return dp(hoverHeightDp) * 1.16f; }
-    public float perchWindowW() { return dp(perchWidthDp) * 1.10f; }
+    public float perchWindowW() {
+        // 趴下边：滑块给的是脑袋"高"，宽度由长宽比推出来
+        if (perchEdge == EDGE_BOTTOM) {
+            float a = (headBX1 - headBX0) / (float) (headBY1 - headBY0);
+            return dp(perchWidthDp) * a * 1.10f;
+        }
+        return dp(perchWidthDp) * 1.10f;
+    }
+
+    /** 趴下边时她实际占的高度（用来把下巴精确落在屏幕下沿） */
+    public float perchVisibleH() { return dp(perchWidthDp); }
     public float perchWindowH() {
+        // 趴下边：滑块＝脑袋高度，窗口只需容下"呼吸"那点伸缩
+        if (perchEdge == EDGE_BOTTOM) return dp(perchWidthDp) * 1.14f;
+        // 趴左右：图转了 90°，用旋转坐标的长宽比
         return dp(perchWidthDp) * (headY1 - headY0) / (float) (headX1 - headX0) * 1.16f;
     }
 
@@ -506,6 +541,19 @@ public class PetView extends View implements Choreographer.FrameCallback {
 
     private void drawPerch(Canvas canvas, float t) {
         if (cur == null) return;
+
+        int bw0 = headBX1 - headBX0, bh0 = headBY1 - headBY0;
+        // ---- 趴屏幕下边：不旋转，脑袋从下沿探出来 ----
+        if (perchEdge == EDGE_BOTTOM) {
+            // 滑块值＝脑袋高度（和趴左右时同一视觉尺寸），宽度按长宽比推
+            float h0 = dp(perchWidthDp) * pSy;
+            float w0 = h0 * bw0 / (float) bh0;
+            float left = (getWidth() - w0) / 2f;
+            float top = pDy * h0;                        // 贴着窗口顶（窗口顶＝屏幕下沿往上一点）
+            canvas.drawBitmap(cur, new Rect(headBX0, headBY0, headBX1, headBY1),
+                    new RectF(left, top, left + w0, top + h0), paint);
+            return;
+        }
         if (rotCache == null || rotCache.isRecycled()) rotCache = rotate90(cur);
         int bw = headX1 - headX0, bh = headY1 - headY0;
         float w = dp(perchWidthDp);

@@ -8,6 +8,8 @@ android {
         applicationId "com.whalepet"
         minSdk 24
         targetSdk 36
+        // 版本号取本分支（fork）的 18 / 0.9.5：本分支在 3428a2b 已升到该版本，
+        // 上游 29 个提交里的最新版本号是 17 / 0.9.0，两者只是序号不是功能，取较大者不回退任何功能。
         versionCode 18
         versionName "0.9.5"
     }
